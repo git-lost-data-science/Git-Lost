@@ -1,2 +1,2 @@
 # Git-Lost
-Project Group for Data Science Exam. 
+Project Group for the Data Science Exam. 
