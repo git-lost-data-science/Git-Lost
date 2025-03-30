@@ -1,46 +1,100 @@
 from csv import reader
 from pprint import pprint 
-# 1
+from sqlite3 import connect 
+from json import load
+from pandas import DataFrame, Series
+
 # DATA MODEL CLASSES
 
-class IdentifiableEntity(object):
-    def __init__(self, id:str):
-        pass
+class IdentifiableEntity():
+    def __init__(self, id:list): # one or more strings
+        if not isinstance(id, list) or not all(isinstance(i, str) for i in id):
+            raise ValueError('IdentifiableEntity.id must be one or more strings')
+        self.id = id
     
     def getId(self):
         return self.id
     
 class Category(IdentifiableEntity):
-    def __init__(self, quartile: str):
-        pass
-    def getQuartile(): # str or None
-        pass
+    def __init__(self, id: str, quartile: str| None): # 1 str or None 
+        super().__init__(id) #inherits from its superclass :)
+        if quartile is not None and not isinstance(quartile, str):
+            raise ValueError("Nope! Quartile must be a string or None!")
+        self.quartile = quartile 
+        
+    def getQuartile(self): 
+        return self.quartile 
 
 class Journal(IdentifiableEntity):
-    pass # building the Journal class 
+    def __init__(self, id:list, title: str, languages: str|list, publisher: str|None, seal: bool, licence: str, pac: bool, hasCategory: list[Category] = None, hasArea: [Area] = None):
+        super().__init__(id)
+        if not isinstance(title, str) or not title:
+            raise ValueError("Title must be a non-empty string.")
+        
+        if isinstance(languages, str):
+            languages = [languages]
+        elif not isinstance(languages, list) or not all(isinstance(lang, str) for lang in languages) or not languages:
+            raise ValueError("Languages must be a non-empty list of strings or a single string.")
+        
+        if publisher is not None and not isinstance(publisher, str):
+            raise ValueError("Publisher must be a string or None.")
+        
+        if not isinstance(seal, bool):
+            raise ValueError("Seal must be a boolean value.")
+        
+        if not isinstance(licence, str) or not licence:
+            raise ValueError("Licence must be a non-empty string.")
+        
+        if not isinstance(pac, bool):
+            raise ValueError("PAC must be a boolean value.")
+        
+        self.title = title
+        self.languages = languages
+        self.publisher = publisher
+        self.seal = seal
+        self.licence = licence
+        self.pac = pac
+        self.categories = hasCategory if hasCategory else []  # List of Category objects, CHECK !
+        self.areas =  hasArea if hasArea else [] # List of Area objects, CHECK !
 
-    def getTitle(): # returns a string 
-        pass
-    def getLanguage(): # returns a list of strings
-        pass
-    def getPublisher(): # string or None
-        pass 
-    def hasDOAJSeal(): # bool 
-        pass
-    def getLicence(): # str
-        pass
-    def hasAPC(): # bool
-        pass
-    def getCategories(): #hasCategory 0...*, related to the class Category, returns a list[Category]
-        pass
-    def getAreas(): #hasArea 0...*, related to the class Area, returns a list[Area]
-        pass
+    def addCategory(self, category): # idk it it is necessary actually
+        if not isinstance(category, Category):
+            raise ValueError("category must be an instance of Category.")
+        self.categories.append(category)
 
-class Area(IdentifiableEntity):
+    def addArea(self, area): # same here
+        if not isinstance(area, Area):
+            raise ValueError("area must be an instance of Area.")
+        self.areas.append(area)
+
+    def getTitle(self):
+        return self.title
+
+    def getLanguage(self):
+        return self.languages
+
+    def getPublisher(self):
+        return self.publisher
+
+    def hasDOAJSeal(self):
+        return self.seal
+
+    def getLicence(self):
+        return self.licence
+
+    def hasAPC(self):
+        return self.pac
+
+    def getCategories(self):
+        return self.categories
+
+    def getAreas(self):
+        return self.areas
+
+class Area(IdentifiableEntity): # 0 or more. Nothing to add, inherits the methods of the super()
     pass
 
-# 2
-# HANDLER (note: we can also add other methods, but the contructors do not take any parameter in input)
+# HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
 
 class Handler(object): 
     pass
