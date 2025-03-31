@@ -4,10 +4,10 @@ from sqlite3 import connect
 from json import load
 from pandas import DataFrame, Series
 
-# DATA MODEL CLASSES
+from pyOptional import Optional
 
 class IdentifiableEntity():
-    def __init__(self, id:list): # one or more strings
+    def __init__(self, id:str|list): # one or more strings 
         if not isinstance(id, list) or not all(isinstance(i, str) for i in id):
             raise ValueError('IdentifiableEntity.id must be one or more strings')
         self.id = id
@@ -16,8 +16,8 @@ class IdentifiableEntity():
         return self.id
     
 class Category(IdentifiableEntity):
-    def __init__(self, id: str, quartile: str| None): # 1 str or None 
-        super().__init__(id) #inherits from its superclass :)
+    def __init__(self, id: str, quartile: Optional[str]): # 1 str or None 
+        super().__init__(id) #inherits from its superclass 
         if quartile is not None and not isinstance(quartile, str):
             raise ValueError("Nope! Quartile must be a string or None!")
         self.quartile = quartile 
@@ -26,7 +26,7 @@ class Category(IdentifiableEntity):
         return self.quartile 
 
 class Journal(IdentifiableEntity):
-    def __init__(self, id:list, title: str, languages: str|list, publisher: str|None, seal: bool, licence: str, pac: bool, hasCategory: list[Category] = None, hasArea: [Area] = None):
+    def __init__(self, id:list, title: str, languages: str|list, publisher: Optional[str], seal: bool, licence: str, pac: bool, hasCategory: list[Category] = None, hasArea: [Area] = None):
         super().__init__(id)
         if not isinstance(title, str) or not title:
             raise ValueError("Title must be a non-empty string.")
