@@ -7,71 +7,75 @@ from pandas import DataFrame, Series
 from pyOptional import Optional
 
 class IdentifiableEntity():
-    def __init__(self, id:str|list): # one or more strings 
+    def __init__(self, id:list|str): # one or more strings. Just covering any case 
         if not isinstance(id, list) or not all(isinstance(i, str) for i in id):
-            raise ValueError('IdentifiableEntity.id must be one or more strings')
-        self.id = id
-    
-    def getId(self):
-        return self.id
+            raise TypeError(f"Expected a list of str or a str, got {type(id).__name__}")
+        self.id = id 
+
+    def getIds(self):
+        return list(self.id)
     
 class Category(IdentifiableEntity):
-    def __init__(self, id: str, quartile: Optional[str]): # 1 str or None 
+    def __init__(self, id, quartile: Optional[str]): # 1 str or None 
         super().__init__(id) #inherits from its superclass 
         if quartile is not None and not isinstance(quartile, str):
-            raise ValueError("Nope! Quartile must be a string or None!")
+            raise TypeError(f"Expected a NoneType or str, got {type(quartile).__name__}")
         self.quartile = quartile 
         
     def getQuartile(self): 
         return self.quartile 
 
+class Area(IdentifiableEntity): # 0 or more. Nothing to add, inherits the methods of the super()
+    pass 
+
 class Journal(IdentifiableEntity):
-    def __init__(self, id:list, title: str, languages: str|list, publisher: Optional[str], seal: bool, licence: str, pac: bool, hasCategory: list[Category] = None, hasArea: [Area] = None):
+    def __init__(self, id, title: str, languages: str|list, publisher: Optional[str], 
+                 seal: bool, licence: str, apc: bool, hasCategory: Optional[list[Category]], 
+                 hasArea: Optional[list[Area]]):
         super().__init__(id)
+
         if not isinstance(title, str) or not title:
-            raise ValueError("Title must be a non-empty string.")
+            raise TypeError(f"Expected a non-empty str, got {type(title).__name__}")
         
-        if isinstance(languages, str):
-            languages = [languages]
-        elif not isinstance(languages, list) or not all(isinstance(lang, str) for lang in languages) or not languages:
-            raise ValueError("Languages must be a non-empty list of strings or a single string.")
+        if not isinstance(languages, list) or not all(isinstance(lang, str) for lang in languages) or not languages:
+            raise TypeError(f"Expected a non-empty str or list, got {type(languages).__name__}")
         
-        if publisher is not None and not isinstance(publisher, str):
-            raise ValueError("Publisher must be a string or None.")
+        if not(isinstance(publisher, str) or isinstance(publisher, None)):
+            raise TypeError(f"Expected a str or a NoneType, got {type(publisher).__name__}")
         
         if not isinstance(seal, bool):
-            raise ValueError("Seal must be a boolean value.")
+            TypeError(f"Expected a boolean, got {type(seal).__name__}")
         
         if not isinstance(licence, str) or not licence:
-            raise ValueError("Licence must be a non-empty string.")
+            raise TypeError(f"Expected a non-empty str, got {type(licence).__name__}")
         
-        if not isinstance(pac, bool):
-            raise ValueError("PAC must be a boolean value.")
+        if not isinstance(apc, bool):
+            raise TypeError(f"Expected a boolean, got {type(apc).__name__}")
         
         self.title = title
         self.languages = languages
         self.publisher = publisher
         self.seal = seal
         self.licence = licence
-        self.pac = pac
-        self.categories = hasCategory if hasCategory else []  # List of Category objects, CHECK !
-        self.areas =  hasArea if hasArea else [] # List of Area objects, CHECK !
+        self.apc = apc
+        self.hasCategory = hasCategory   # ! List of Category objects, CHECK !
+        self.hasArea =  hasArea # ! List of Area objects, CHECK 
 
-    def addCategory(self, category): # idk it it is necessary actually
-        if not isinstance(category, Category):
-            raise ValueError("category must be an instance of Category.")
-        self.categories.append(category)
+#      def addCategory(self, category): # ! CHECK if it is necessary!
+#         if not isinstance(category, Category):
+#             raise ValueError("category must be an instance of Category.")
+#         self.categories.append(category)
 
-    def addArea(self, area): # same here
-        if not isinstance(area, Area):
-            raise ValueError("area must be an instance of Area.")
-        self.areas.append(area)
+#     def addArea(self, area): # same here
+#         if not isinstance(area, Area):
+#             raise ValueError("area must be an instance of Area.")
+#         self.areas.append(area) """
 
     def getTitle(self):
         return self.title
 
     def getLanguage(self):
-        return self.languages
+        return list(self.languages)
 
     def getPublisher(self):
         return self.publisher
@@ -83,16 +87,15 @@ class Journal(IdentifiableEntity):
         return self.licence
 
     def hasAPC(self):
-        return self.pac
+        return self.apc
 
     def getCategories(self):
-        return self.categories
+        return list(self.hasCategory)
 
     def getAreas(self):
-        return self.areas
+        return list(self.hasArea)
 
-class Area(IdentifiableEntity): # 0 or more. Nothing to add, inherits the methods of the super()
-    pass
+
 
 # HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
 
