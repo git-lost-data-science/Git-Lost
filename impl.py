@@ -1,8 +1,8 @@
-from csv import reader
+import csv # reader
 from pprint import pprint 
-from sqlite3 import connect 
-from json import load
-from pandas import DataFrame, Series
+import sqlite3 # connect 
+import json # load
+import pandas # DataFrame, Series
 
 from pyOptional import Optional
 
@@ -17,7 +17,7 @@ class IdentifiableEntity():
     
 class Category(IdentifiableEntity):
     def __init__(self, id, quartile: Optional[str]): # 1 str or None 
-        super().__init__(id) #inherits from its superclass 
+        super().__init__(id) # inherits from its superclass 
         if quartile is not None and not isinstance(quartile, str):
             raise TypeError(f"Expected a NoneType or str, got {type(quartile).__name__}")
         self.quartile = quartile 
@@ -97,28 +97,47 @@ class Journal(IdentifiableEntity):
 
 
 
-# HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
+# TODO : HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
 
-class Handler(object): 
-    pass
-    def getDbPathOrUrl(): # str
-        pass
-    def setDbPathOrUrl(self, pathOrUrl:str):# bool: check if the path is valid
+class Handler(object): # this and the upload handler merely exist to provide the CategoryUploadHandler with sutiable methods
+    def __init__(self):
+        self.dbPathOrUrl = ""
+        
+    def getDbPathOrUrl(self): # ! str, note for myself (Nico): Check 'self' object descriptor
+        return self.dbPathOrUrl
+        # print(my_path.dbPathOrUrl)
+
+    def setDbPathOrUrl(self, pathOrUrl: str) -> bool: # bool: check if the path is valid
+        # self.dbPathOrUrl = # something relating to the path or url that is given to the function as a string
+        # my_path = ........
         pass
 
 # UPLOAD HANDLER 
 
 class UploadHandler(Handler):
-    def __init__(self):
+    def pushDataToDb(self, path: str) -> bool: # returns a bool 
+        # * this SHOULD receive the data in the same format regardless of its initial type
+        # this should use get and set methods. I'm not sure if it relates to the 'getter' and/or 'setter' methods
+        # maybe the path is passed in as a string, and then it is SET via the setter (inherited from the Handler superclass)
+        # at this point, perhaps there is no set path yet, so we need to set the path (using the string and the setter)
         pass
-    def pushDataToDb(self, path:str): # returns a bool 
-        pass
-
-class JournalUploadHandler(UploadHandler): # handles CSV files
-    pass
 
 class CategoryUploadHandler(UploadHandler): # handles JSON files
-    pass
+    # this should work with other json files too (regardless of the name)
+    with open("categories.json", "r", encoding="utf-8") as f:
+        json_doc = json.load(f)
+    # the data here needs to be in a format that is compatible with the upload handler
+    # this needs to use the # ? pushDataToDb method INHERITED from the superclass
+
+# * json methods: 
+''' SQL stuff:
+# with sqlite3.connect("whatever.db") as con:
+    #.to_sql("VenueId", con, if_exists="replace", index=False)
+    # con.commit() # commit the current transaction to the database
+'''
+# * load 
+
+# TODO : Handlers
 
 # QUERY HANDLER 
 class QueryHandler(Handler):
@@ -151,6 +170,15 @@ class JournalQueryHandler(): # all the methods return a DatafRame
 # 4
 
 # FULL QUERY ENGINE
+class BasicQueryEngine():
+    pass
+    def cleanJournalHandlers(): # bool 
+        pass
+    def cleanCategoryHanders(): #bool 
+        pass
+    # etc. 
+    # testing 
+
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
     pass
     def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]): 
@@ -160,11 +188,3 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
     def getDiamondJournalsAreasAmdCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]):
         pass
 
-class BasicQueryEngine(object):
-    pass
-    def cleanJournalHandlers(): # bool 
-        pass
-    def cleanCategoryHanders(): #bool 
-        pass
-    # etc. 
-    # testing 
