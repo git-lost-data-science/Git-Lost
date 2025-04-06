@@ -2,7 +2,10 @@ from csv import reader
 from pprint import pprint 
 from sqlite3 import connect 
 from json import load
-from pandas import DataFrame, Series
+from pandas import DataFrame, Series, pd
+import pandas as pd
+# ? import uuid
+import re
 
 from pyOptional import Optional
 
@@ -100,24 +103,58 @@ class Journal(IdentifiableEntity):
 # HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
 
 class Handler(object): 
-    pass
-    def getDbPathOrUrl(): # str
-        pass
-    def setDbPathOrUrl(self, pathOrUrl:str):# bool: check if the path is valid
-        pass
+    def __init__(self):
+        self.dbPathOrUrl = ""
+
+    # @property 
+    def getDbPathOrUrl(self): 
+        return self.dbPathOrUrl 
+     
+    # @getDbPathOrUrl.setter
+    def setDbPathOrUrl(self, pathOrUrl: str) -> bool:  # setter
+        if not pathOrUrl.strip():  # check if it is empty. If it is, the path is not valid. 
+            return False
+        if pathOrUrl.endswith(".db"): 
+            self.dbPathOrUrl = pathOrUrl
+            return True
+        elif re.match(r"^https?://[a-zA-Z0-9.-]+(?:\:\d+)?/blazegraph(?:/[\w\-./]*)?/sparql$", pathOrUrl):
+            self.dbPathOrUrl = pathOrUrl
+            return True
+        return False
 
 # UPLOAD HANDLER 
 
 class UploadHandler(Handler):
     def __init__(self):
-        pass
-    def pushDataToDb(self, path:str): # returns a bool 
-        pass
+        super().__init__()
 
-class JournalUploadHandler(UploadHandler): # handles CSV files
+    def pushDataToDb(self, path:str) -> bool: 
+        if path.endswith(".json"):
+            with open(CategoryUploadHandler, 'r') as json_data: # opening the json file
+                data = load(json_data) 
+                # here 'normalizing' means converting into pandas dataframes
+                id = pd.json_normalize(data, record_path='identifiers', meta=None)
+                cat = pd.json_normalize(data, record_path='categories', meta=['identifiers', 'areas']) # ! because they are nested 
+                area = pd.json_normalize(data, record_path='areas', meta=None)
+                try: 
+                    conn= connect(path)
+
+                    id.to_sql('Journal', conn, if_exists='append', index=False)
+                    cat.to_sql('Category', conn, if_exists='append', index=False)
+                    area.to_sql('Area', conn, if_exists='append', index=False)
+                    
+                    conn.close(path)
+                    return True
+                
+                except Exception as e:
+                    print(f"Error uploading data: {e}")
+                    return False       
+        else: 
+            pass # Martina e Rumana 
+class JournalUploadHandler(UploadHandler): # handles CSV files, checking the type
     pass
 
-class CategoryUploadHandler(UploadHandler): # handles JSON files
+class CategoryUploadHandler(UploadHandler): # handles JSON files, checking the type
     pass
 
 # QUERY HANDLER 
@@ -148,7 +185,14 @@ class JournalQueryHandler(): # all the methods return a DatafRame
     def JournalsWithDOAJSeal():
         pass
 
-# 4
+class BasicQueryEngine(object):
+    pass
+    def cleanJournalHandlers(): # bool 
+        pass
+    def cleanCategoryHanders(): #bool 
+        pass
+    # etc. 
+    # testing 
 
 # FULL QUERY ENGINE
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
@@ -160,11 +204,3 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
     def getDiamondJournalsAreasAmdCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]):
         pass
 
-class BasicQueryEngine(object):
-    pass
-    def cleanJournalHandlers(): # bool 
-        pass
-    def cleanCategoryHanders(): #bool 
-        pass
-    # etc. 
-    # testing 
