@@ -18,7 +18,7 @@ jou.pushDataToDb("data/doaj.csv")
 ```
 
 ### The Category and Journal upload handlers (and the `UploadHandler` superclass)
-These can be stubs for now unless there is a more meaningful use for them. They are merely a good way to 'type' the object passed into the `pushDataToDb` method and to determine whether the processing applied is for the CSV data or the JSON data. Think about it like this: is the object that you have created a `JournalUploadHandler` or a `CategoryUploadHandler`? 
+For now, these can be stubs for now unless there is a more meaningful use for them. They can temporarily be a good way to 'type' the object passed into the `pushDataToDb` method and to determine whether the processing applied is for the CSV data or the JSON data. Think about it like this: is the object that you have created a `JournalUploadHandler` or a `CategoryUploadHandler`? 
 
 P.S: The `path` parameter here is the string name for the CSV/JSON files that the data comes from. It is not the same as the path that is used in the `Handler` class. Ilaria and I will work on the related JSON data processing here (with Pandas), while the CSV side of things should be done by Martina and Rumana. I will suggest a certain implementation of the function with some steps that resemble pseudocode:
 
