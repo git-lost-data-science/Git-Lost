@@ -2,7 +2,10 @@ from csv import reader
 from pprint import pprint 
 from sqlite3 import connect 
 from json import load
-from pandas import DataFrame, Series
+from pandas import DataFrame, Series, pd
+import pandas as pd
+# ? import uuid
+import re
 
 from pyOptional import Optional
 
@@ -95,60 +98,111 @@ class Journal(IdentifiableEntity):
     def getAreas(self):
         return list(self.hasArea)
 
-
+############## TODO FIX FOR TUESDAY
 
 # HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
 
 class Handler(object): 
-    pass
-    def getDbPathOrUrl(): # str
-        pass
-    def setDbPathOrUrl(self, pathOrUrl:str):# bool: check if the path is valid
-        pass
+    def __init__(self):
+        self.dbPathOrUrl = ""
+
+    # @property 
+    def getDbPathOrUrl(self): 
+        return self.dbPathOrUrl 
+     
+    # @getDbPathOrUrl.setter
+    def setDbPathOrUrl(self, pathOrUrl: str) -> bool:  # setter
+        if self.dbPathOrUrl:    ## if self.dbPathOrUrl is not a falsy value e.g. 0, "", False
+            pass  # TODO A IF statement that sets a new path if 1) already exists 2) is not valid and needs to be modified
+        else:
+            if not pathOrUrl.strip(): 
+                return False
+            if pathOrUrl.endswith(".db"): # if it is a local path: it is valid
+                self.dbPathOrUrl = pathOrUrl
+                return True
+            elif re.match(r"^https?://[a-zA-Z0-9.-]+(?:\:\d+)?/blazegraph(?:/[\w\-./]*)?/sparql$", pathOrUrl): # if it is a blazegraph url: valid
+                self.dbPathOrUrl = pathOrUrl
+                return True
+            return False # else: not valid
 
 # UPLOAD HANDLER 
 
 class UploadHandler(Handler):
     def __init__(self):
-        pass
-    def pushDataToDb(self, path:str): # returns a bool 
-        pass
+        super().__init__()
+
+    def pushDataToDb(self, path:str) -> bool: 
+        if path.endswith(".json"):
+                try: 
+                    conn= connect(path)
+                    # id.to_sql('Journal', conn, if_exists='append', index=False)
+                    # cat.to_sql('Category', conn, if_exists='append', index=False)
+                    # area.to_sql('Area', conn, if_exists='append', index=False)
+                    
+                    conn.close(path)
+                    return True
+                
+                except Exception as e:
+                    print(f"Error uploading data: {e}")
+                    return False       
+        else: # path is a .csv 
+            pass # TODO Martina e Rumana for pushing the data of the CSV
+
 
 class JournalUploadHandler(UploadHandler): # handles CSV files
-    pass
+    pass # TODO transform the CSV file into a graph???????
 
 class CategoryUploadHandler(UploadHandler): # handles JSON files
-    pass
+    pass # TODO transform the JSON file into DFs
+
+
+############ TODO FOR TUESDAY AND END OF APRIL (hopefully)
 
 # QUERY HANDLER 
-class QueryHandler(Handler):
-    pass
-    def getById(id:str): # returns a DataFrame
-        pass
+class QueryHandler(Handler): 
+    super().__init__() 
 
-# 3
+    def getById(id: str) -> DataFrame: # returns a journal, a caterogy or an area based on the input ID
+        pass # Ila
 
 class CategoryQueryHandler(QueryHandler):
     pass
-    def getById(id:str): # DataFrame
-        pass 
+    def getAllCategories() -> DataFrame: # Rumana
+        pass
+    def getAllAreas() -> DataFrame: # Martina
+        pass
+    def getCategoriesWithQuartile(quartiles:set[str]) ->DataFrame: # Nico
+        pass
+    def getCategoriesAssignedToAreas(area_ids: set[str]) -> DataFrame: # Ila
+        pass
+    def getAreasAssignedToCategories(caterory_ids: set[str]) -> DataFrame: # Rumana
+        pass
 
-class JournalQueryHandler(): # all the methods return a DatafRame
+class JournalQueryHandler(): # all the methods return a DataFrame
     pass
-    def getAllJournals(): 
+    def getAllJournals(): # Martina
         pass
-    def getJournalsWithTitle(self, partialTitle:str): 
+    def getJournalsWithTitle(self, partialTitle:str): # Nico
         pass
-    def getJournalsPublishedBy(self, partialName: str):
+    def getJournalsPublishedBy(self, partialName: str): #Ila
         pass
-    def getJournalsWothLicense(self, licenses:set[str]):
+    def getJournalsWothLicense(self, licenses:set[str]): # Rumana
         pass
-    def JournalsWithAPC():
+    def JournalsWithAPC(): #Martina
         pass
-    def JournalsWithDOAJSeal():
+    def JournalsWithDOAJSeal(): # Nico
         pass
 
-# 4
+#########################
+
+class BasicQueryEngine(object):
+    pass
+    def cleanJournalHandlers(): # bool 
+        pass
+    def cleanCategoryHanders(): #bool 
+        pass
+    # etc. 
+    # testing 
 
 # FULL QUERY ENGINE
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
@@ -160,11 +214,3 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
     def getDiamondJournalsAreasAmdCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]):
         pass
 
-class BasicQueryEngine(object):
-    pass
-    def cleanJournalHandlers(): # bool 
-        pass
-    def cleanCategoryHanders(): #bool 
-        pass
-    # etc. 
-    # testing 
