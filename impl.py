@@ -2,7 +2,7 @@ from csv import reader
 from pprint import pprint 
 from sqlite3 import connect 
 from json import load
-from pandas import DataFrame, Series, pd
+from pandas import DataFrame, Series
 import pandas as pd
 # ? import uuid
 import re
@@ -98,7 +98,7 @@ class Journal(IdentifiableEntity):
     def getAreas(self):
         return list(self.hasArea)
 
-
+############## TODO FIX FOR TUESDAY
 
 # HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
 
@@ -112,15 +112,18 @@ class Handler(object):
      
     # @getDbPathOrUrl.setter
     def setDbPathOrUrl(self, pathOrUrl: str) -> bool:  # setter
-        if not pathOrUrl.strip():  # check if it is empty. If it is, the path is not valid. 
-            return False
-        if pathOrUrl.endswith(".db"): 
-            self.dbPathOrUrl = pathOrUrl
-            return True
-        elif re.match(r"^https?://[a-zA-Z0-9.-]+(?:\:\d+)?/blazegraph(?:/[\w\-./]*)?/sparql$", pathOrUrl):
-            self.dbPathOrUrl = pathOrUrl
-            return True
-        return False
+        if self.dbPathOrUrl:    ## if self.dbPathOrUrl is not a falsy value e.g. 0, "", False
+            pass  # TODO A IF statement that sets a new path if 1) already exists 2) is not valid and needs to be modified
+        else:
+            if not pathOrUrl.strip(): 
+                return False
+            if pathOrUrl.endswith(".db"): # if it is a local path: it is valid
+                self.dbPathOrUrl = pathOrUrl
+                return True
+            elif re.match(r"^https?://[a-zA-Z0-9.-]+(?:\:\d+)?/blazegraph(?:/[\w\-./]*)?/sparql$", pathOrUrl): # if it is a blazegraph url: valid
+                self.dbPathOrUrl = pathOrUrl
+                return True
+            return False # else: not valid
 
 # UPLOAD HANDLER 
 
@@ -130,60 +133,88 @@ class UploadHandler(Handler):
 
     def pushDataToDb(self, path:str) -> bool: 
         if path.endswith(".json"):
-            with open(CategoryUploadHandler, 'r') as json_data: # opening the json file
-                data = load(json_data) 
-                # here 'normalizing' means converting into pandas dataframes
-                id = pd.json_normalize(data, record_path='identifiers', meta=None)
-                cat = pd.json_normalize(data, record_path='categories', meta=['identifiers', 'areas']) # ! because they are nested 
-                area = pd.json_normalize(data, record_path='areas', meta=None)
                 try: 
-                    conn= connect(path)
+                    with connect(self.pathOrUrl) as conn:                        
+                        self.json_df.to_sql('JSONFile', conn, if_exists='replace', index=False) # the entire json file + internalids as a table
+                    # cat.to_sql('Category', conn, if_exists='replace', index=False)
+                    # area.to_sql('Area', conn, if_exists='replace', index=False)
 
-                    id.to_sql('Journal', conn, if_exists='append', index=False)
-                    cat.to_sql('Category', conn, if_exists='append', index=False)
-                    area.to_sql('Area', conn, if_exists='append', index=False)
-                    
-                    conn.close(path)
+                        conn.commit()
                     return True
                 
                 except Exception as e:
                     print(f"Error uploading data: {e}")
                     return False       
-        else: 
-            pass # Martina e Rumana 
-class JournalUploadHandler(UploadHandler): # handles CSV files, checking the type
-    pass
+        else: # path is a .csv 
+            pass # TODO Martina e Rumana for pushing the data of the CSV
 
-class CategoryUploadHandler(UploadHandler): # handles JSON files, checking the type
-    pass
+
+class JournalUploadHandler(UploadHandler): # handles CSV files
+    pass # TODO transform the CSV file into a graph???????
+
+class CategoryUploadHandler(UploadHandler): 
+    def __init__(self, json_file):
+        self.json_file= json_file
+        with open(self.json_file, "r", encoding="utf-8") as f:
+            json_data= load(f)
+            self.json_df = pd.DataFrame(json_data) # casting the json file into a pandas DataFrame
+
+            df_identifiers= self.json_df[["identifiers"]] # creating an internal id for every object (with identifier) in the json file
+            internal_ids = []
+            for idx, row in df_identifiers.iterrows():
+                internal_ids.append("category-" + str(idx))
+                self.json_df.insert(0, "internal-id-cat", Series(internal_ids, dtype="string")) # now every category has its internal id, named "internal-id-cat"
+            
+            self.json_df = self.json_df.rename(columns={"identifiers": "journals-ids"}) # renaming the column "identifiers" to "journals-ids"
+            return self.json_df # returning the whole DF with "internal-id-cat", "journals-ids", "categories" and "areas"
+
+            # create another DF with internal-id-cat, journals-ids, categories
+            # create another DF with internal-id-cat, journals-ids, areas
+            # return these df 
+
+        
+        
+    
+    
+
+############ TODO FOR TUESDAY AND END OF APRIL (hopefully)
 
 # QUERY HANDLER 
-class QueryHandler(Handler):
-    pass
-    def getById(id:str): # returns a DataFrame
-        pass
+class QueryHandler(Handler): 
+    super().__init__() 
 
-# 3
+    def getById(id: str) -> DataFrame: # returns a journal, a caterogy or an area based on the input ID
+        pass # Ila
 
 class CategoryQueryHandler(QueryHandler):
     pass
-    def getById(id:str): # DataFrame
-        pass 
+    def getAllCategories() -> DataFrame: # Rumana
+        pass
+    def getAllAreas() -> DataFrame: # Martina
+        pass
+    def getCategoriesWithQuartile(quartiles:set[str]) ->DataFrame: # Nico
+        pass
+    def getCategoriesAssignedToAreas(area_ids: set[str]) -> DataFrame: # Ila
+        pass
+    def getAreasAssignedToCategories(caterory_ids: set[str]) -> DataFrame: # Rumana
+        pass
 
-class JournalQueryHandler(): # all the methods return a DatafRame
+class JournalQueryHandler(): # all the methods return a DataFrame
     pass
-    def getAllJournals(): 
+    def getAllJournals(): # Martina
         pass
-    def getJournalsWithTitle(self, partialTitle:str): 
+    def getJournalsWithTitle(self, partialTitle:str): # Nico
         pass
-    def getJournalsPublishedBy(self, partialName: str):
+    def getJournalsPublishedBy(self, partialName: str): #Ila
         pass
-    def getJournalsWothLicense(self, licenses:set[str]):
+    def getJournalsWothLicense(self, licenses:set[str]): # Rumana
         pass
-    def JournalsWithAPC():
+    def JournalsWithAPC(): #Martina
         pass
-    def JournalsWithDOAJSeal():
+    def JournalsWithDOAJSeal(): # Nico
         pass
+
+#########################
 
 class BasicQueryEngine(object):
     pass
