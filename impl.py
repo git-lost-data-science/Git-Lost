@@ -134,14 +134,10 @@ class UploadHandler(Handler):
     def pushDataToDb(self, path:str) -> bool: 
         if path.endswith(".json"):
                 try: 
-                    with connect(self.pathOrUrl) as conn:                        
-                        self.json_df.to_sql('JSONFile', conn, if_exists='replace', index=False) # the entire json file + internalids as a table
-                    # cat.to_sql('Category', conn, if_exists='replace', index=False)
-                    # area.to_sql('Area', conn, if_exists='replace', index=False)
-
+                    with connect(self.dbPathOrUrl) as conn:                        
+                        self.categories_df.to_sql('JSONFile', conn, if_exists='replace', index=False) # ? idk if it is the proper way to do it, lol
                         conn.commit()
                     return True
-                
                 except Exception as e:
                     print(f"Error uploading data: {e}")
                     return False       
@@ -154,28 +150,46 @@ class JournalUploadHandler(UploadHandler): # handles CSV files
 
 class CategoryUploadHandler(UploadHandler): 
     def __init__(self, json_file):
+        super().__init__()
         self.json_file= json_file
+        # loading the json file
         with open(self.json_file, "r", encoding="utf-8") as f:
             json_data= load(f)
             self.json_df = pd.DataFrame(json_data) # casting the json file into a pandas DataFrame
 
-            df_identifiers= self.json_df[["identifiers"]] # creating an internal id for every object (with identifier) in the json file
+            # creating an internal id for every object in the json file
+            df_identifiers= self.json_df[["identifiers"]] 
             internal_ids = []
             for idx, row in df_identifiers.iterrows():
-                internal_ids.append("category-" + str(idx))
-                self.json_df.insert(0, "internal-id-cat", Series(internal_ids, dtype="string")) # now every category has its internal id, named "internal-id-cat"
+                internal_ids.append("cat-" + str(idx)) # cat-0, cat-1, cat-2, etc.
             
-            self.json_df = self.json_df.rename(columns={"identifiers": "journals-ids"}) # renaming the column "identifiers" to "journals-ids"
-            return self.json_df # returning the whole DF with "internal-id-cat", "journals-ids", "categories" and "areas"
 
-            # create another DF with internal-id-cat, journals-ids, categories
-            # create another DF with internal-id-cat, journals-ids, areas
-            # return these df 
+            self.json_df.insert(0, "internal-id", Series(internal_ids, dtype="string")) # inserting into the DF the column "internal-id"
+            self.json_df = self.json_df.rename(columns={"identifiers": "journals-ids"}) # renaming the column "identifiers" to "journals-ids", for clarity
+            
+            # I want to modify the DF self.json_df 'cause the column of the different 'categores' with quartiles is a list of dictionaries, so it is not readable. Let's put them into different rows.
+            rows = []
+            for _, row in self.json_df.iterrows(): # let's take what we need from the original DF (self.json_df)
+                journal_id = row["journals-ids"]  
+                internal_id = row["internal-id"] 
+                categories = row["categories"]
+                areas= row["areas"]
 
-        
-        
-    
-    
+            # appending everything in the list 'rows'
+                for cat in categories:
+                    for area in areas: 
+                        rows.append({
+                            "internal-id": internal_id,  
+                            "journal-id": journal_id,  
+                            "category": cat.get("id"),  # here I changed the 'id' (referred to the category) to 'cat-name', cause it is more understandable
+                            "quartile": cat.get("quartile"),
+                            "area": area
+                        })
+
+            # now the list 'rows' needs to become a DF
+            self.categories_df = pd.DataFrame(rows)
+            return self.categories_df # returning the whole DF with "internal-id-cat", "journals-ids", "categories" and "areas"
+            # ! P.S. some categories don't have quartiles, so it is written 'None. Do we need to change it? 
 
 ############ TODO FOR TUESDAY AND END OF APRIL (hopefully)
 
