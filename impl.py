@@ -2,12 +2,12 @@ from csv import reader
 from pprint import pprint 
 from sqlite3 import connect 
 from json import load
-from pandas import DataFrame, Series
+from pandas import DataFrame, Series, read_csv
 import pandas as pd
-# ? import uuid
 import re
-
+from rdflib import URIRef, Literal, Graph, RDF
 from pyOptional import Optional
+from rdflib.plugins.stores.sparqlstore import SPARQLUpdateStore 
 
 class IdentifiableEntity():
     def __init__(self, id:list|str): # one or more strings. Just covering any case 
@@ -98,8 +98,6 @@ class Journal(IdentifiableEntity):
     def getAreas(self):
         return list(self.hasArea)
 
-############## TODO FIX FOR TUESDAY
-
 # HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
 
 class Handler(object): 
@@ -112,8 +110,8 @@ class Handler(object):
      
     # @getDbPathOrUrl.setter
     def setDbPathOrUrl(self, pathOrUrl: str) -> bool:  # setter
-        if self.dbPathOrUrl:    ## if self.dbPathOrUrl is not a falsy value e.g. 0, "", False
-            pass  # TODO A IF statement that sets a new path if 1) already exists 2) is not valid and needs to be modified
+        if self.dbPathOrUrl: 
+            return True
         else:
             if not pathOrUrl.strip(): 
                 return False
@@ -127,33 +125,100 @@ class Handler(object):
 
 # UPLOAD HANDLER 
 
-class UploadHandler(Handler):
+class UploadHandler(Handler): # ? da fixare 
     def __init__(self):
         super().__init__()
 
-    def pushDataToDb(self, path:str) -> bool: 
+    def pushDataToDb(self, path: str) -> bool:
         if path.endswith(".json"):
-                try: 
-                    with connect(self.dbPathOrUrl) as conn:                        
-                        self.categories_df.to_sql('JSONFile', conn, if_exists='replace', index=False) # ? idk if it is the proper way to do it, lol
-                        conn.commit()
-                    return True
-                except Exception as e:
-                    print(f"Error uploading data: {e}")
-                    return False       
-        else: # path is a .csv 
-            pass # TODO Martina e Rumana for pushing the data of the CSV
+            try:
+                cat = CategoryUploadHandler(path)
+                cat.setDbPathOrUrl(self.dbPathOrUrl)
+                with connect(self.dbPathOrUrl) as conn:
+                    cat.categories_df.to_sql(path, conn, if_exists="replace", index=False)
+                return True
+            except Exception as e:
+                print(f"Error uploading data: {e}")
+                return False      
+        else: 
+            try: 
+                graph_endpoint = self.pathOrUrl
+                jou = JournalUploadHandler() 
+                jou.setDbPathOrUrl(graph_endpoint)
+
+                store = SPARQLUpdateStore()
+                store.open((graph_endpoint, graph_endpoint))
+
+                for triple in jou.triples((None, None, None)): 
+                    store.add(triple) 
+                    
+                # Once finished, remember to close the connection
+                store.close()
+                return True 
+            except Exception as e:
+                print(f"Error uploading data: {e}")
+                return False     
 
 
-class JournalUploadHandler(UploadHandler): # handles CSV files
-    pass # TODO transform the CSV file into a graph???????
+class JournalUploadHandler(UploadHandler): # ? check 
+    def __init___(self):
+        super().__init__() # inherits the "path:str" from the UploadHandler
 
-class CategoryUploadHandler(UploadHandler): 
-    def __init__(self, json_file):
-        super().__init__()
-        self.json_file= json_file
+        # reading the csv with pandas
+        journals = read_csv(self.path, 
+                  keep_default_na=False,
+                  dtype={
+                      "Journal Title": "string",
+                      "Journal ISSN (print version)": "string",
+                      "Languages in which the journal accepts manuscripts": "string",
+                      "Publisher": "string",
+                      "DOAJ Seal": "string", 
+                      "Journal license": "string",
+                      "APC": "string"
+                  })
+        
+        # renaming the header
+        journals = journals.rename(columns={'Journal title': 'title', 
+                                         'Languages in which the journal accepts manuscripts': 'languages', 
+                                         'Publisher': 'publisher',
+                                         'Journal license': 'license',
+                                         'APC': 'apc'})
+        
+        journal_graph= Graph() # creating the graph that contains everything 
+        base_url = "https://comp-data.github.io/res/" # base url
+        Journal = URIRef("https://schema.org/ScholarlyArticle")  # URI of the CLASS
+        # URIs of the ATTRIBUTES (i.e. headers)
+        title = URIRef("https://schema.org/name")
+        languages = URIRef ("https://schema.org/Language")
+        publisher = URIRef("https://schema.org/publisher")
+        doaj_seal= URIRef("https://www.wikidata.org/wiki/Q73548471")
+        license = URIRef("https://schema.org/license")
+        apc= URIRef("https://www.wikidata.org/wiki/Q15291071")
+        
+        journals_internal_id= {} # a dictionary with title(name of the journal): baseurl+internal_id(subject)
+
+        for idx, row in journals.iterrows():
+            local_id = "journal-"+ str(idx)
+            subject= URIRef(base_url + local_id) # ex. "https://comp-data.github.io/res/journal-0"
+
+            journals_internal_id[row["title"]] = subject
+        
+            journal_graph.add((subject, RDF.type, Journal)) # impostiamo come type il Journal. 1 RDF.type = 1 grafico 
+            # per ogni row[""] aggiungi nel grafico l'uri del giornale, l'uri dell'header (titolo, lingua, ecc.) e la str di riferimento
+            journal_graph.add((subject, title, Literal(row["title"])))
+            journal_graph.add((subject, languages, Literal(row["languages"])))
+            journal_graph.add((subject, publisher, Literal(row["publisher"])))
+            journal_graph.add((subject, doaj_seal, Literal(row["DOAJ seal"])))
+            journal_graph.add((subject, license, Literal(row["license"])))
+            journal_graph.add((subject, apc, Literal(row["apc"])))
+
+
+class CategoryUploadHandler(UploadHandler): # ? check 
+    def __init__(self): 
+        super().__init__() # inherits the "path:str" from the UploadHandler
+
         # loading the json file
-        with open(self.json_file, "r", encoding="utf-8") as f:
+        with open(self.path, "r", encoding="utf-8") as f:
             json_data= load(f)
             self.json_df = pd.DataFrame(json_data) # casting the json file into a pandas DataFrame
 
@@ -181,17 +246,14 @@ class CategoryUploadHandler(UploadHandler):
                         rows.append({
                             "internal-id": internal_id,  
                             "journal-id": journal_id,  
-                            "category": cat.get("id"),  # here I changed the 'id' (referred to the category) to 'cat-name', cause it is more understandable
+                            "category": cat.get("id"),  # here I changed the 'id' (referred to the category) to 'category', cause it is more understandable
                             "quartile": cat.get("quartile"),
                             "area": area
                         })
 
             # now the list 'rows' needs to become a DF
             self.categories_df = pd.DataFrame(rows)
-            return self.categories_df # returning the whole DF with "internal-id-cat", "journals-ids", "categories" and "areas"
-            # ! P.S. some categories don't have quartiles, so it is written 'None. Do we need to change it? 
-
-############ TODO FOR TUESDAY AND END OF APRIL (hopefully)
+            self.categories_df["quartile"] = self.categories_df["quartile"].fillna("N/A") # some categories don't have quartiles. Instead of "None", here we have N/A
 
 # QUERY HANDLER 
 class QueryHandler(Handler): 
