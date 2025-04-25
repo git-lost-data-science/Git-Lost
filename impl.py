@@ -144,13 +144,12 @@ class UploadHandler(Handler):
                 print(f"Error uploading data: {e}")
                 return False       
         elif path.endswith(".csv"): # ? This case MUST be included because the file can't just be assumed to be CSV
-            pass # TODO Pushing the data of the CSV (Martina and Rumana)
-        else: 
-            return False # ? This case must be included
-
-    def _json_file_to_df(self, _: str) -> pd.DataFrame:
-        ... # ? needed; defined in the CategoryUploadHandler
-
+             try: # Ila changed this, to be completed 
+                 pass
+                return True 
+            except Exception as e:
+                print(f"Error uploading data: {e}")
+                return False     
 
 class JournalUploadHandler(UploadHandler):
     pass
@@ -197,6 +196,7 @@ class CategoryUploadHandler(UploadHandler):
                         })
 
             categories_df = pd.DataFrame(rows)
+            categories_df["quartile"] = categories_df["quartile"].fillna("N/A") # Ila: some categories don't have quartiles. Instead of "None", here we have N/A
             return categories_df 
         
 # TODO FOR THE END OF APRIL (hopefully)
