@@ -2,7 +2,7 @@ from csv import reader
 from pprint import pprint 
 from sqlite3 import connect 
 from json import load
-from pandas import DataFrame, Series, read_csv
+from pandas import DataFrame, Series, read_csv, read_sql
 import pandas as pd
 import re
 from rdflib import URIRef, Literal, Graph, RDF
@@ -10,7 +10,7 @@ from pyOptional import Optional
 from rdflib.plugins.stores.sparqlstore import SPARQLUpdateStore 
 
 class IdentifiableEntity():
-    def __init__(self, id:list|str): # one or more strings. Just covering any case 
+    def __init__(self, id:list|str): 
         if not isinstance(id, list) or not all(isinstance(i, str) for i in id):
             raise TypeError(f"Expected a list of str or a str, got {type(id).__name__}")
         self.id = id 
@@ -125,10 +125,11 @@ class Handler(object):
 
 # UPLOAD HANDLER 
 
-class UploadHandler(Handler): # ? da fixare 
+class UploadHandler(Handler): 
     def __init__(self):
         super().__init__()
 
+# Nico has done it differently
     def pushDataToDb(self, path: str) -> bool:
         if path.endswith(".json"):
             try:
@@ -140,7 +141,7 @@ class UploadHandler(Handler): # ? da fixare
             except Exception as e:
                 print(f"Error uploading data: {e}")
                 return False      
-        else: 
+        elif path.endswith(".csv"): # my version of pushing. To be checked 
             try: 
                 graph_endpoint = self.pathOrUrl
                 jou = JournalUploadHandler() 
@@ -152,7 +153,6 @@ class UploadHandler(Handler): # ? da fixare
                 for triple in jou.triples((None, None, None)): 
                     store.add(triple) 
                     
-                # Once finished, remember to close the connection
                 store.close()
                 return True 
             except Exception as e:
@@ -160,12 +160,11 @@ class UploadHandler(Handler): # ? da fixare
                 return False     
 
 
-class JournalUploadHandler(UploadHandler): # ? check 
-    def __init___(self):
-        super().__init__() # inherits the "path:str" from the UploadHandler
+class JournalUploadHandler(UploadHandler):
+    # I used Nico's approach, without the self 
 
-        # reading the csv with pandas
-        journals = read_csv(self.path, 
+    def _csv_file_to_df(self, csv_file:str) -> pd.DataFrame:
+        journals = read_csv(csv_file, 
                   keep_default_na=False,
                   dtype={
                       "Journal Title": "string",
@@ -184,26 +183,29 @@ class JournalUploadHandler(UploadHandler): # ? check
                                          'Journal license': 'license',
                                          'APC': 'apc'})
         
+        journals = journals.fillna("N/A", inplace= True) # iterates on the DF and replaces the empty cells with "N/A"
+
         journal_graph= Graph() # creating the graph that contains everything 
         base_url = "https://comp-data.github.io/res/" # base url
         Journal = URIRef("https://schema.org/ScholarlyArticle")  # URI of the CLASS
+
         # URIs of the ATTRIBUTES (i.e. headers)
         title = URIRef("https://schema.org/name")
         languages = URIRef ("https://schema.org/Language")
         publisher = URIRef("https://schema.org/publisher")
-        doaj_seal= URIRef("https://www.wikidata.org/wiki/Q73548471")
+        doaj_seal= URIRef("https://www.wikidata.org/wiki/Q73548471") # another schema would be wikidata
         license = URIRef("https://schema.org/license")
         apc= URIRef("https://www.wikidata.org/wiki/Q15291071")
-        
-        journals_internal_id= {} # a dictionary with title(name of the journal): baseurl+internal_id(subject)
 
         for idx, row in journals.iterrows():
             local_id = "journal-"+ str(idx)
             subject= URIRef(base_url + local_id) # ex. "https://comp-data.github.io/res/journal-0"
 
+            journals_internal_id= {} # a dictionary with title(name of the journal): baseurl+internal_id(subject)
             journals_internal_id[row["title"]] = subject
         
             journal_graph.add((subject, RDF.type, Journal)) # impostiamo come type il Journal. 1 RDF.type = 1 grafico 
+
             # per ogni row[""] aggiungi nel grafico l'uri del giornale, l'uri dell'header (titolo, lingua, ecc.) e la str di riferimento
             journal_graph.add((subject, title, Literal(row["title"])))
             journal_graph.add((subject, languages, Literal(row["languages"])))
@@ -211,9 +213,10 @@ class JournalUploadHandler(UploadHandler): # ? check
             journal_graph.add((subject, doaj_seal, Literal(row["DOAJ seal"])))
             journal_graph.add((subject, license, Literal(row["license"])))
             journal_graph.add((subject, apc, Literal(row["apc"])))
+        return journal_graph 
 
 
-class CategoryUploadHandler(UploadHandler): # ? check 
+class CategoryUploadHandler(UploadHandler): # ? my version, not Nico's
     def __init__(self): 
         super().__init__() # inherits the "path:str" from the UploadHandler
 
@@ -260,6 +263,8 @@ class QueryHandler(Handler):
     super().__init__() 
 
     def getById(id: str) -> DataFrame: # returns a journal, a caterogy or an area based on the input ID
+        # ! The ID parameter for getById corresponds to the id attribute of the IdentifiableEntity class.
+        # questo è da capire un po'. Non sono sicura di come dovrei implementarlo e, soprattutto, come fa a collegare l'area all'ID. 
         pass # Ila
 
 class CategoryQueryHandler(QueryHandler):
@@ -270,7 +275,14 @@ class CategoryQueryHandler(QueryHandler):
         pass
     def getCategoriesWithQuartile(quartiles:set[str]) ->DataFrame: # Nico
         pass
-    def getCategoriesAssignedToAreas(area_ids: set[str]) -> DataFrame: # Ila
+    def getCategoriesAssignedToAreas(area_ids: set[str]) -> DataFrame: # ! Ila
+        # relational, with sqlite
+        # dovrebbe connettersi al db di sqlite e accedere alla table "Categories"
+        # ? areas_ids = set di tutte le aree che sono nel file json. Non capisco come devo prendere questo input
+        # crea un dizionario con le aree in area_ids
+        # per ogni area in areas_ds se l'area è presente nella table di Categories, allora prendi il literal nella colonna categories e aggiungilo nel dizionario con area:categories.
+        # trasforma il dizionario in df formato dalle varie aree come headers (key) e le categorie (values)
+        # return il df 
         pass
     def getAreasAssignedToCategories(caterory_ids: set[str]) -> DataFrame: # Rumana
         pass
@@ -281,7 +293,10 @@ class JournalQueryHandler(): # all the methods return a DataFrame
         pass
     def getJournalsWithTitle(self, partialTitle:str): # Nico
         pass
-    def getJournalsPublishedBy(self, partialName: str): #Ila
+    def getJournalsPublishedBy(self, partialName: str): #! Ila
+        # graph db, sparql
+        # qui bisognerebbe collegarsi al db di blazegraph
+        # bisognerebbe poi fare qualcosa tipo se partialName in "Literal" che è collegato al Journal, allora ritornami un df dei titoli dei giornali
         pass
     def getJournalsWothLicense(self, licenses:set[str]): # Rumana
         pass
@@ -290,18 +305,43 @@ class JournalQueryHandler(): # all the methods return a DataFrame
     def JournalsWithDOAJSeal(): # Nico
         pass
 
-#########################
-
 class BasicQueryEngine(object):
     pass
     def cleanJournalHandlers(): # bool 
         pass
     def cleanCategoryHanders(): #bool 
         pass
-    # etc. 
-    # testing 
+# here I think we need to create the graphs and 'clean' the DF to see if there are doubles, if the years (and numbers in general) are floats, etc. 
+    
+    def addJournalHandler(handler: JournalQueryHandler) -> bool:
+        pass
+    def addCategoryHandler(handler: CategoryQueryHandler) -> bool: 
+        pass
+    def getEntityById(id:str) -> Optional[IdentifiableEntity]:
+        pass
+    def getAllJournals() -> list[Journal]:
+        pass
+    def getJournalsWithTitle(partialTitle:str) ->list[Journal]:
+        pass
+    def getJournalsPublishedBy(partialName:str) -> list[Journal]:
+        pass
+    def getJournalsWithLicense(licenses:set[str]) -> list[Journal]:
+        pass
+    def JournalsWithAPC() -> list[Journal]:
+        pass
+    def getJournalsWithDOAJSeal() -> list[Journal]:
+        pass
+    def getAllCategories() -> list[Category]:
+        pass
+    def getAllAreas() -> list[Area]:
+        pass
+    def getCategoriesWithQuartile(quartiles:set[str]) -> list[Category]:
+        pass
+    def getCategoriesAssignedToAreas(areas_ids: set[str]) -> list[Category]:
+        pass
+    def getAreasAssignedToCategories(category_ids: set[str]) -> list[Area]:
+        pass
 
-# FULL QUERY ENGINE
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
     pass
     def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]): 
