@@ -144,12 +144,17 @@ class UploadHandler(Handler):
                 print(f"Error uploading data: {e}")
                 return False       
         elif path.endswith(".csv"): # ? This case MUST be included because the file can't just be assumed to be CSV
-             try: # Ila changed this, to be completed 
-                 pass
-                return True 
+            try: # TODO Pushing the data of the CSV (Martina and Rumana)
+                pass
             except Exception as e:
                 print(f"Error uploading data: {e}")
-                return False     
+                return False  
+        else: 
+            return False # ? This case must be included
+
+    def _json_file_to_df(self, _: str) -> pd.DataFrame:
+        ... # ? needed; defined in the CategoryUploadHandler
+
 
 class JournalUploadHandler(UploadHandler):
     pass
@@ -194,12 +199,12 @@ class CategoryUploadHandler(UploadHandler):
                             "quartile": cat.get("quartile", np.nan), 
                             "area": area
                         })
-
+            
             categories_df = pd.DataFrame(rows)
-            categories_df["quartile"] = categories_df["quartile"].fillna("N/A") # Ila: some categories don't have quartiles. Instead of "None", here we have N/A
+            # Ila: categories_df["quartile"] = self.categories_df["quartile"].fillna("N/A") 
             return categories_df 
         
-# TODO FOR THE END OF APRIL (hopefully)
+# TODO BY THE END OF APRIL (hopefully)
 
 # QUERY HANDLER 
 class QueryHandler(Handler):  
@@ -232,25 +237,50 @@ class JournalQueryHandler(): # all the methods return a DataFrame
         pass
     def JournalsWithDOAJSeal(): # Nico
         pass
-
-#########################
-
+        
+# Ila changed this: I just added all the functions 
 class BasicQueryEngine(object):
     pass
-    def cleanJournalHandlers(): # bool 
+    def cleanJournalHandlers() -> bool:
         pass
-    def cleanCategoryHanders(): # bool 
+    def cleanCategoryHanders() -> bool: 
         pass
-    # etc. 
-    # testing 
+# Ila: here I think we need to create the graphs and 'clean' the DF to see if there are doubles, if the years (and numbers in general) are floats, etc. 
+    
+    def addJournalHandler(handler: JournalQueryHandler) -> bool:
+        pass
+    def addCategoryHandler(handler: CategoryQueryHandler) -> bool: 
+        pass
+    def getEntityById(id:str) -> Optional[IdentifiableEntity]:
+        pass
+    def getAllJournals() -> list[Journal]:
+        pass
+    def getJournalsWithTitle(partialTitle:str) ->list[Journal]:
+        pass
+    def getJournalsPublishedBy(partialName:str) -> list[Journal]:
+        pass
+    def getJournalsWithLicense(licenses:set[str]) -> list[Journal]:
+        pass
+    def JournalsWithAPC() -> list[Journal]:
+        pass
+    def getJournalsWithDOAJSeal() -> list[Journal]:
+        pass
+    def getAllCategories() -> list[Category]:
+        pass
+    def getAllAreas() -> list[Area]:
+        pass
+    def getCategoriesWithQuartile(quartiles:set[str]) -> list[Category]:
+        pass
+    def getCategoriesAssignedToAreas(areas_ids: set[str]) -> list[Category]:
+        pass
+    def getAreasAssignedToCategories(category_ids: set[str]) -> list[Area]:
+        pass
 
-# FULL QUERY ENGINE
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
     pass
-    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]): 
+    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]) -> list[Journal]: 
         pass
-    def getJournalsInAreasWithLicense(self, areas_ids: set[str]): 
+    def getJournalsInAreasWithLicense(self, areas_ids:set[str])-> list[Journal]: 
         pass
-    def getDiamondJournalsAreasAndCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]):
+    def getDiamondJournalsAreasAmdCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str])-> list[Journal]:
         pass
-
