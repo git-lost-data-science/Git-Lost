@@ -1,87 +1,7 @@
-from rdflib import Graph
-from rdflib import RDF, URIRef, Literal
 import pandas
-from pandas import read_csv, Series, DataFrame
+from pandas import read_csv, Series, DataFrame, read_json
+from rdflib import RDF, URIRef, Literal, Graph
 from rdflib.plugins.stores.sparqlstore import SPARQLUpdateStore
-
-# form pyOptional import Optional 
-
-# class IdentifiableEntity(object):
-#     def __init__(self, id:list|str): # one or more strings. Just covering any case 
-#         if not isinstance(id, list) or not all(isinstance(i, str) for i in id):
-#             raise TypeError(f"Expected a list of str or a str, got {type(id).__name__}")
-#         self.id = id 
-
-#     def getIds(self):
-#         return list(self.id)
-
-# class Journal(IdentifiableEntity):
-#     def __init__(self, id, title: str, languages: str|list, publisher: Optional[str], 
-#                  seal: bool, licence: str, apc: bool, hasCategory: Optional[list[Category]], 
-#                  hasArea: Optional[list[Area]]):
-#         super().__init__(id)
-
-#         if not isinstance(title, str) or not title:
-#             raise TypeError(f"Expected a non-empty str, got {type(title).__name__}")
-        
-#         if not isinstance(languages, list) or not all(isinstance(lang, str) for lang in languages) or not languages:
-#             raise TypeError(f"Expected a non-empty str or list, got {type(languages).__name__}")
-        
-#         if not(isinstance(publisher, str) or isinstance(publisher, None)):
-#             raise TypeError(f"Expected a str or a NoneType, got {type(publisher).__name__}")
-        
-#         if not isinstance(seal, bool):
-#             TypeError(f"Expected a boolean, got {type(seal).__name__}")
-        
-#         if not isinstance(licence, str) or not licence:
-#             raise TypeError(f"Expected a non-empty str, got {type(licence).__name__}")
-        
-#         if not isinstance(apc, bool):
-#             raise TypeError(f"Expected a boolean, got {type(apc).__name__}")
-        
-#         self.title = title
-#         self.languages = languages
-#         self.publisher = publisher
-#         self.seal = seal
-#         self.licence = licence
-#         self.apc = apc
-#         self.hasCategory = hasCategory   # ! List of Category objects, CHECK !
-#         self.hasArea =  hasArea # ! List of Area objects, CHECK 
-
-# #      def addCategory(self, category): # ! CHECK if it is necessary!
-# #         if not isinstance(category, Category):
-# #             raise ValueError("category must be an instance of Category.")
-# #         self.categories.append(category)
-
-# #     def addArea(self, area): # same here
-# #         if not isinstance(area, Area):
-# #             raise ValueError("area must be an instance of Area.")
-# #         self.areas.append(area) """
-
-#     def getTitle(self):
-#         return self.title
-
-#     def getLanguage(self):
-#         return list(self.languages)
-
-#     def getPublisher(self):
-#         return self.publisher
-
-#     def hasDOAJSeal(self):
-#         return self.seal
-
-#     def getLicence(self):
-#         return self.licence
-
-#     def hasAPC(self):
-#         return self.apc
-
-#     def getCategories(self):
-#         return list(self.hasCategory)
-
-#     def getAreas(self):
-#         return list(self.hasArea)
-
 
 # HANDLERS (note: we can also add other methods, but the contructors do not take any parameter in input)
 class Handler(object): 
@@ -119,63 +39,97 @@ class UploadHandler(Handler):
             jou.pushDataToDb("data_science_project/doaj.csv")
             return True 
 
-class JournalUploadHandler(UploadHandler): # handles CSV files
-    # according to chatgpt if we don't have to use methods this is not necessary, so check afterwards:
-    # def __init__(self):
-    #     super.__init__()
-    #     self.JournalUploadHandler = URIRef("https://schema.org/Periodical") 
-    #     self.journal = read_csv("/Users/Martina/Desktop/data_science_project/doaj.csv")
-   
-    # Our initial idea of process for creating a graph and associating the class Journal:
-
-        # Journal = URIRef("https://schema.org/Periodical")
-        # journal_handler = Journal
-
-        # title = journal_handler.getTitle()
-        # title = URIref("https://schema.org/name")
-
+class JournalUploadHandler(UploadHandler): # handles CSV files 
+    # initiating an empty graph:
     j_graph = Graph()
+        
+    # referencing all the classes:    
+    Journal = URIRef("https://schema.org/Periodical")   # I think I'm referencing in this way directly to the class Journal 
+                                                        # if I'm not wrong
+    Category = URIRef("https://schema.org/category")    # NOT SURE                   
+    Area = URIRef("https://schema.org/subjectOf")   # NOT SURE
 
+    # referencing the attributes:
+    title = URIRef("https://schema.org/name")
+    languages = URIRef ("https://schema.org/inLanguage") # (superseded /Language)
+    publisher = URIRef("https://schema.org/publisher")
+    seal = URIRef("http://doaj.org/static/doaj/doajArticles.xsd")    
+    license = URIRef("https://schema.org/license")
+    apc = URIRef("https://shcema.org/isAccessibleForFree") # this is a boolean value in theory so it should work.
+    quartile = URIRef()  # NOT SURE -- this is actually a pain in the ASS to reference
+
+    # referencing the relations:  NOT SURE -- or maybe this is OK but I don't need the classes and the attributes (of Category and Area)?
+    hasCategory = URIRef("http://purl.org/dc/terms/isPartOf")
+    hasArea = URIRef("http://purl.org/dc/terms/subject") # the hasArea better fits the idea of 'subject' rather than hasCategory
+        
     j_path = "/Users/Martina/Desktop/data_science_project/doaj.csv"
-    journal = read_csv(j_path, keep_default_na=False)
-
-    journal_df = journal.rename(columns={'Journal title': 'title', 
+    journals = read_csv(j_path, 
+                       keep_default_na=False, 
+                       dtype={
+                              'Journal title': 'string', 
+                              'Languages in which the journal accepts manuscripts': 'string', 
+                              'Publisher': 'string',
+                              'DOAJ Seal': 'bool',
+                              'Journal license': 'string',
+                              'APC': 'bool' 
+                       })
+    journals = journals.rename(columns={'Journal title': 'title', 
                                          'Languages in which the journal accepts manuscripts': 'languages', 
                                          'Publisher': 'publisher',
                                          'DOAJ Seal': 'seal',
                                          'Journal license': 'license',
                                          'APC': 'apc'})
-    
-    journal_df = URIRef("https://schema.org/Periodical") # we still don't know how to reference the entries as a whole as 
-                                                         # periodicals and how to reference (if we have to) Journal class
-    title = URIRef("https://schema.org/name")
-    languages = URIRef ("https://schema.org/Language")
-    publisher = URIRef("https://schema.org/publisher")
-    # seal = # to be found yet
-    license = URIRef("https://schema.org/license")
-    # apc = ??
-    
-    base_URL = "/Users/Martina/Desktop/data_science_project/"
-    
-    journal_int_id = {}
-    for idx, row in journal_df.iterrows():
+
+    base_URL = "/Users/Martina/Desktop/data_science_project/res"
+
+    # THIS PART IS ADDED AFTERWARDS --
+    json = read_json("/data_science_project/scimago.json", lines=True)
+        
+    category_int_id = {}
+    for idx, row in json.items():
+        loc_id = "category-" + str(idx)
+
+        subj = URIRef(base_url + loc_id)
+
+        category_int_id[row['categories']] = subj
+
+        j_graph.add((subj, RDF.type, hasCategory))
+        # j_graph.add((subj, quartile, Literal[row['quartile']]))  --  This should be added if ONLY I had a damn URIRef #
+
+     area_int_id = {}
+     for idx, row in json.items():
+        loc_id = "area-" + str(idx)
+
+        subj = URIRef(base_url + loc_id)
+        
+        area_int_id[row['area']] = subj
+
+        j_graph.add((subj, RDF.type, hasArea))
+     
+    # -- THIS PART IS ADDED AFTERWARDS.
+        
+    journals_int_id = {}
+    for idx, row in journals.iterrows():
         loc_id = "journal-" + str(idx)
 
         subj = URIRef(base_URL + loc_id)
 
-        journal_int_id[row['title']] = subj
-        
+        journals_int_id[row['title']] = subj
+
+        j_grap.add((subj, RDF.type, Journal))
         j_graph.add((subj, title, Literal(row['title'])))
-        j_graph.add((subj, languages, Literal(row['languages'])))
+        j_graph.add((subj, languages, Literal(row['languages'].split(','))))
         j_graph.add((subj, publisher, Literal(row['publisher'])))
+        j_graph.add((subj, seal, Literal(row['seal'])))    
         j_graph.add((subj, license, Literal(row['license'])))
-    
+        j_graph.add((subj, apc, Literal(row['apc']))) 
+        # THIS PART IS ADDED AFTERWARDS --    
+        j_graph.add((subj, hasCategory, category_int_id[row['categories']]))  # HERE I'm technically missing just the @quartile
+        j_graph.add((subj, hasArea, area_int_id[row['area']]))
+        # -- THIS PART IS ADDED AFTWERWARDS. 
     # print(len(j_graph))
-
-    # maybe we can also realte Journal through RDF owl:equivalentClass???
-    # journal = Journal()
-    # journal = URIRef("")
-
+    # technically with the idea we had before, this ^ should be all, but maybe not... 
+    # [I'm adding the processing for also the '# NOT SURE' categories -- BEFORE the journal impl]
 
 class CategoryUploadHandler(UploadHandler): # handles JSON files
     pass
