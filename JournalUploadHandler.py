@@ -55,8 +55,7 @@ class JournalUploadHandler(UploadHandler): # handles CSV files
         hasCategory = URIRef("http://purl.org/dc/terms/isPartOf")
         hasArea = URIRef("http://purl.org/dc/terms/subject") # the hasArea better fits the idea of 'subject' rather than hasCategory
             
-        j_path = "/Users/Martina/Desktop/data_science_project/doaj.csv"
-        journals = read_csv(j_path, 
+        journals = read_csv(csv_file, 
                            keep_default_na=False, 
                            dtype={
                                   'Journal title': 'string', 
@@ -73,7 +72,7 @@ class JournalUploadHandler(UploadHandler): # handles CSV files
                                              'Journal license': 'license',
                                              'APC': 'apc'})
     
-        base_url = "/Users/Martina/Desktop/data_science_project/res"  
+        base_url = "https://github.com/git-lost-data-science/res"  
             
         journals_int_id = {}
         for idx, row in journals.iterrows():
