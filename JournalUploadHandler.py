@@ -18,25 +18,21 @@ class UploadHandler(Handler):
     def pushDataToDb(self, path:str): # returns a bool  # if the file is CSV then push data to graph --> if everything is okay returns True
         # if ... this first if checks whether i don't know it's a JSON file, path ends with '.json'
         # elif ... checks if it's a CSV --> then pushing to Graph
-        if ".csv" in path:
-            jou = JournalUploadHandler() 
-            jou.setDbPathOrUrl(graph_endpoint)
+        if path.endswith(".csv"):
+            journal = JournalUploadHandler() 
+            journal.setDbPathOrUrl(graph_endpoint)
 
             store = SPARQLUpdateStore()
 
-            # The URL of the SPARQL endpoint is the same URL of the Blazegraph
-            # instance + '/sparql'
             graph_endpoint = 'http://127.0.0.1:9999/blazegraph/sparql'
 
-            # It opens the connection with the SPARQL endpoint instance
             store.open((graph_endpoint, graph_endpoint))
 
-            for triple in jou.triples((None, None, None)):  # in this case None means `*` (= anything), 
-                store.add(triple)                                # you can also specify conditions if you need (ex. RDF.type)
-                
-            # Once finished, remember to close the connection
+            for triple in journal.triples((None, None, None)):  
+                store.add(triple)                           
+           
             store.close()
-            jou.pushDataToDb("data_science_project/doaj.csv")
+            # journal.pushDataToDb("data_science_project/doaj.csv") # ? What is this?
             return True 
 
 class JournalUploadHandler(UploadHandler): # handles CSV files 
