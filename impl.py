@@ -5,8 +5,10 @@ import re
 from pprint import pprint 
 from typing import Optional
 
+import rdflib
 import pandas as pd  # * DataFrame, Series
 import sqlite3 # * connect
+from rdflib.plugins.stores.sparqlstore import SPARQLUpdateStore
 
 # ? I (Nico) have fixed imports
 # ? Having this import setup makes it very clear which functions and classes belong to which libraries
@@ -144,20 +146,93 @@ class UploadHandler(Handler):
                 print(f"Error uploading data: {e}")
                 return False       
         elif path.endswith(".csv"): # ? This case MUST be included because the file can't just be assumed to be CSV
-            try: # TODO Pushing the data of the CSV (Martina and Rumana)
-                pass
+            jou_graph = self._csv_file_to_graph(path)
+            try:
+                store = SPARQLUpdateStore()
+                store.open((self.dbPathOrUrl, self.dbPathOrUrl))
+    
+                for triple in jou_graph.triples((None, None, None)):  
+                    store.add(triple)                           
+               
+                store.close()    
+                return True
             except Exception as e:
                 print(f"Error uploading data: {e}")
                 return False  
+            # pass # TODO Pushing the data of the CSV (Martina and Rumana)
+
         else: 
             return False # ? This case must be included
 
     def _json_file_to_df(self, _: str) -> pd.DataFrame:
         ... # ? needed; defined in the CategoryUploadHandler
+    
+    def _csv_file_to_graph(self, _: str) -> rdflib.Graph:
+        ... # ? needed; defined in the JournalUploadHandler
 
 
 class JournalUploadHandler(UploadHandler):
-    pass
+    def _csv_file_to_graph(self, csv_file: str):
+        # initiating an empty graph:
+        j_graph = rdflib.Graph()
+            
+        # referencing all the classes:    
+        Journal = rdflib.URIRef("https://schema.org/Periodical")   
+        Category = rdflib.URIRef("https://schema.org/category")                       
+        Area = rdflib.URIRef("https://schema.org/subjectOf")  
+    
+        # referencing the attributes:
+        title = rdflib.URIRef("https://schema.org/name")
+        languages = rdflib.URIRef ("https://schema.org/inLanguage") # (superseded /Language)
+        publisher = rdflib.URIRef("https://schema.org/publisher")
+        seal = rdflib.URIRef("http://doaj.org/static/doaj/doajArticles.xsd")    
+        license = rdflib.URIRef("https://schema.org/license")
+        apc = rdflib.URIRef("https://schema.org/isAccessibleForFree") # this is a boolean value in theory so it should work.
+        
+        # referencing the relations: 
+        hasCategory = rdflib.URIRef("http://purl.org/dc/terms/isPartOf")
+        hasArea = rdflib.URIRef("http://purl.org/dc/terms/subject") # the hasArea better fits the idea of 'subject' rather than hasCategory
+            
+        journals = pd.read_csv(csv_file, 
+                           keep_default_na=False, 
+                           dtype={
+                                  'Journal title': 'string', 
+                                  'Languages in which the journal accepts manuscripts': 'string', 
+                                  'Publisher': 'string',
+                                  'DOAJ Seal': 'bool',
+                                  'Journal license': 'string',
+                                  'APC': 'bool' 
+                           })
+        journals = journals.rename(columns={'Journal title': 'title', 
+                                             'Languages in which the journal accepts manuscripts': 'languages', 
+                                             'Publisher': 'publisher',
+                                             'DOAJ Seal': 'seal',
+                                             'Journal license': 'license',
+                                             'APC': 'apc'})
+    
+        base_url = "https://github.com/git-lost-data-science/res"
+            
+        journals_int_id = {}
+        for idx, row in journals.iterrows():
+            loc_id = "journal-" + str(idx)
+    
+            subj = rdflib.URIRef(base_url + loc_id)
+    
+            journals_int_id[row['title']] = subj
+    
+            j_graph.add((subj, rdflib.RDF.type, Journal))
+            j_graph.add((subj, title, rdflib.Literal(row['title'])))
+            j_graph.add((subj, languages, rdflib.Literal(row['languages'].split(','))))
+            j_graph.add((subj, publisher, rdflib.Literal(row['publisher'])))
+            j_graph.add((subj, seal, rdflib.Literal(row['seal'])))    
+            j_graph.add((subj, license, rdflib.Literal(row['license'])))
+            j_graph.add((subj, apc, rdflib.Literal(row['apc']))) 
+            # THIS PART IS ADDED AFTERWARDS --    
+            j_graph.add((subj, hasCategory, Category)) # category_int_id[row['categories']]))  # HERE I'm technically missing just the @quartile
+            j_graph.add((subj, hasArea, Area)) # area_int_id[row['area']]))
+            # -- THIS PART IS ADDED AFTWERWARDS. 
+        # print(len(j_graph))
+        return j_graph
 
 class CategoryUploadHandler(UploadHandler): 
     # ? How does this work?
@@ -199,12 +274,11 @@ class CategoryUploadHandler(UploadHandler):
                             "quartile": cat.get("quartile", np.nan), 
                             "area": area
                         })
-            
+
             categories_df = pd.DataFrame(rows)
-            # Ila: categories_df["quartile"] = self.categories_df["quartile"].fillna("N/A") 
             return categories_df 
         
-# TODO BY THE END OF APRIL (hopefully)
+# TODO FOR THE END OF APRIL (hopefully)
 
 # QUERY HANDLER 
 class QueryHandler(Handler):  
