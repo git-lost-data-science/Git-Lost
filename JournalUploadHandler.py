@@ -76,7 +76,7 @@ class JournalUploadHandler(UploadHandler): # handles CSV files
                                          'Journal license': 'license',
                                          'APC': 'apc'})
 
-    base_URL = "/Users/Martina/Desktop/data_science_project/res"
+    base_url = "/Users/Martina/Desktop/data_science_project/res"  # This probably needs to be fixed in order to be more generally accessible
 
     # THIS PART IS ADDED AFTERWARDS --
     json = read_json("/data_science_project/scimago.json", lines=True)
