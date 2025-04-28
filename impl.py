@@ -119,6 +119,9 @@ class Handler:
         return self.dbPathOrUrl 
      
     def setDbPathOrUrl(self, pathOrUrl: str) -> bool:  # setter
+        if self.dbPathOrUrl:
+            self.dbPathOrUrl = pathOrUrl
+            
         if not pathOrUrl.strip(): 
             return False
         if pathOrUrl.endswith(".db"): # if it is a local path: it is valid
