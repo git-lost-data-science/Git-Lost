@@ -79,11 +79,11 @@ class JournalUploadHandler(UploadHandler): # handles CSV files
         for idx, row in journals.iterrows():
             loc_id = "journal-" + str(idx)
     
-            subj = URIRef(base_URL + loc_id)
+            subj = URIRef(base_url + loc_id)
     
             journals_int_id[row['title']] = subj
     
-            j_grap.add((subj, RDF.type, Journal))
+            j_graph.add((subj, RDF.type, Journal))
             j_graph.add((subj, title, Literal(row['title'])))
             j_graph.add((subj, languages, Literal(row['languages'].split(','))))
             j_graph.add((subj, publisher, Literal(row['publisher'])))
