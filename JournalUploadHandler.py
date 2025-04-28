@@ -24,7 +24,7 @@ class UploadHandler(Handler):
                 store = SPARQLUpdateStore()
                 store.open((self.dbPathOrUrl, self.dbPathOrUrl))
     
-                for triple in journal.triples((None, None, None)):  
+                for triple in jou_graph.triples((None, None, None)):  
                     store.add(triple)                           
                
                 store.close()    
