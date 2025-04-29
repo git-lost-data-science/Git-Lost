@@ -315,49 +315,50 @@ class JournalQueryHandler(): # all the methods return a DataFrame
     def JournalsWithDOAJSeal(): # Nico
         pass
         
-# Ila changed this: I just added all the functions 
 class BasicQueryEngine(object):
     pass
-    def cleanJournalHandlers() -> bool:
+    def cleanJournalHandlers() -> bool:  # Rumana
         pass
-    def cleanCategoryHanders() -> bool: 
+    def cleanCategoryHanders() -> bool: # Ila
         pass
-# Ila: here I think we need to create the graphs and 'clean' the DF to see if there are doubles, if the years (and numbers in general) are floats, etc. 
+# here I think we need to create the graphs and 'clean' the DF to see if there are doubles, if the years (and numbers in general) are floats, etc. 
     
-    def addJournalHandler(handler: JournalQueryHandler) -> bool:
+    def addJournalHandler(handler: JournalQueryHandler) -> bool: # Martina
         pass
-    def addCategoryHandler(handler: CategoryQueryHandler) -> bool: 
+    def addCategoryHandler(handler: CategoryQueryHandler) -> bool: # Nico 
         pass
-    def getEntityById(id:str) -> Optional[IdentifiableEntity]:
+    def getEntityById(id:str) -> Optional[IdentifiableEntity]: # Rumana
         pass
-    def getAllJournals() -> list[Journal]:
+    def getAllJournals() -> list[Journal]: # Ila
         pass
-    def getJournalsWithTitle(partialTitle:str) ->list[Journal]:
+    def getJournalsWithTitle(partialTitle:str) ->list[Journal]: # Martina
         pass
-    def getJournalsPublishedBy(partialName:str) -> list[Journal]:
+    def getJournalsPublishedBy(partialName:str) -> list[Journal]: # Nico
         pass
-    def getJournalsWithLicense(licenses:set[str]) -> list[Journal]:
+    def getJournalsWithLicense(licenses:set[str]) -> list[Journal]: # Rumana
         pass
-    def JournalsWithAPC() -> list[Journal]:
+    def JournalsWithAPC() -> list[Journal]: # Ila 
         pass
-    def getJournalsWithDOAJSeal() -> list[Journal]:
+    def getJournalsWithDOAJSeal() -> list[Journal]: # Martina
         pass
-    def getAllCategories() -> list[Category]:
+    def getAllCategories() -> list[Category]: # Nico 
         pass
-    def getAllAreas() -> list[Area]:
+    def getAllAreas() -> list[Area]: # Rumana
         pass
-    def getCategoriesWithQuartile(quartiles:set[str]) -> list[Category]:
+    def getCategoriesWithQuartile(quartiles:set[str]) -> list[Category]: # Ila
         pass
-    def getCategoriesAssignedToAreas(areas_ids: set[str]) -> list[Category]:
+    def getCategoriesAssignedToAreas(areas_ids: set[str]) -> list[Category]: # Martina
         pass
-    def getAreasAssignedToCategories(category_ids: set[str]) -> list[Area]:
+    def getAreasAssignedToCategories(category_ids: set[str]) -> list[Area]: # Nico 
         pass
 
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
     pass
-    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]) -> list[Journal]: 
+    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]): # Rumana
         pass
-    def getJournalsInAreasWithLicense(self, areas_ids:set[str])-> list[Journal]: 
+    def getJournalsInAreasWithLicense(self, areas_ids:set[str]): # Ila 
         pass
-    def getDiamondJournalsAreasAmdCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str])-> list[Journal]:
+    def getDiamondJournalsAreasAmdCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
         pass
+
+
