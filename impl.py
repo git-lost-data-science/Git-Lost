@@ -9,13 +9,8 @@ import rdflib
 import pandas as pd  # * DataFrame, Series
 import sqlite3 # * connect
 from rdflib.plugins.stores.sparqlstore import SPARQLUpdateStore
+from sparql_dataframe import get 
 
-# ? I (Nico) have fixed imports
-# ? Having this import setup makes it very clear which functions and classes belong to which libraries
-# ? The first paragraph consists solely of modules that are included in the base installation of Python
-# ? The second paragraph is made up of libraries that require installation
-
-# ? I have made this class as a simpler means of error handling and to avoid duplication
 class TypeMismatchError(Exception):
     def __init__(self, expected_type_description: str, obj: object):
         actual_type_name = type(obj).__name__
@@ -41,7 +36,7 @@ class Category(IdentifiableEntity):
     def getQuartile(self): 
         return self.quartile 
 
-class Area(IdentifiableEntity): # ? 0 or more. Nothing to add, inherits the methods of the super()
+class Area(IdentifiableEntity): 
     pass 
 
 class Journal(IdentifiableEntity):
@@ -185,7 +180,9 @@ class JournalUploadHandler(UploadHandler):
         Area = rdflib.URIRef("https://schema.org/subjectOf")  
     
         # referencing the attributes:
-        title = rdflib.URIRef("https://schema.org/name")
+        title = rdflib.URIRef("https://schema.org/title") # ? Ila changed this to title 
+        issn = rdflib.URIRef("https://schema.org/issn") # ? ila added this
+        eissn= rdflib.URIRef("https://schema.org/eissn") # ? ila added this
         languages = rdflib.URIRef ("https://schema.org/inLanguage") # (superseded /Language)
         publisher = rdflib.URIRef("https://schema.org/publisher")
         seal = rdflib.URIRef("http://doaj.org/static/doaj/doajArticles.xsd")    
@@ -200,6 +197,8 @@ class JournalUploadHandler(UploadHandler):
                            keep_default_na=False, 
                            dtype={
                                   'Journal title': 'string', 
+                                  'Journal ISSN (print version)': 'string',
+                                  'Journal EISSN (online version)': 'string',
                                   'Languages in which the journal accepts manuscripts': 'string', 
                                   'Publisher': 'string',
                                   'DOAJ Seal': 'bool',
@@ -207,6 +206,8 @@ class JournalUploadHandler(UploadHandler):
                                   'APC': 'bool' 
                            })
         journals = journals.rename(columns={'Journal title': 'title', 
+                                            'Journal ISSN (print version)': 'id-print',
+                                            'Journal EISSN (online version)': 'id-online',
                                              'Languages in which the journal accepts manuscripts': 'languages', 
                                              'Publisher': 'publisher',
                                              'DOAJ Seal': 'seal',
@@ -225,6 +226,8 @@ class JournalUploadHandler(UploadHandler):
     
             j_graph.add((subj, rdflib.RDF.type, Journal))
             j_graph.add((subj, title, rdflib.Literal(row['title'])))
+            j_graph.add((subj, issn, rdflib.Literal(row['id-print'])))
+            j_graph.add((subj, eissn, rdflib.Literal(row['id-online'])))
             j_graph.add((subj, languages, rdflib.Literal(row['languages'].split(','))))
             j_graph.add((subj, publisher, rdflib.Literal(row['publisher'])))
             j_graph.add((subj, seal, rdflib.Literal(row['seal'])))    
@@ -238,17 +241,8 @@ class JournalUploadHandler(UploadHandler):
         return j_graph
 
 class CategoryUploadHandler(UploadHandler): 
-    # ? How does this work?
-    # ? 1. An instance of this class is initalised
-    # ? 2. The method is called in the pushDataToDB class to produce the dataframe
 
-    def _json_file_to_df(self, json_file: str) -> pd.DataFrame: # the string path
-        # * Some changes here !!!
-        # * 1. Labelling the objects as 'self' does not make any sense
-        # * 2. I have changed the journal-id label to journal-ids because there are cases where 
-        # * there are multiple journal ids
-        # * 3. I use np.nan as the second argument of the .get function for the quartile line
-
+    def _json_file_to_df(self, json_file: str) -> pd.DataFrame: 
         with open(json_file, "r", encoding="utf-8") as f:
             json_data = json.load(f)
             json_df = pd.DataFrame(json_data) 
@@ -280,35 +274,143 @@ class CategoryUploadHandler(UploadHandler):
 
             categories_df = pd.DataFrame(rows)
             return categories_df 
-        
-# TODO FOR THE END OF APRIL (hopefully)
 
 # QUERY HANDLER 
-class QueryHandler(Handler):  
-    def getById(id: str) -> pd.DataFrame: 
-        pass # Ila
+class QueryHandler(Handler): # ! done, but Ila needs to test it 
+    def __init__(self):
+        super().__init__()  
+
+    def getById(self, id: str) -> pd.DataFrame: 
+        path = self.dbPathOrUrl
+        if path.endswith(".db"): 
+            try:
+                with sqlite3.connect(path) as con: # LIKE is used also to match partial strings 
+                    query = """
+                        SELECT * FROM Category
+                        WHERE LOWER([internal-id]) = LOWER(?)
+                           OR LOWER([journal-ids]) LIKE LOWER(?) 
+                           OR LOWER([category]) = LOWER(?) 
+                           OR LOWER([quartile]) = LOWER(?)
+                           OR LOWER([area]) = LOWER(?)
+                    """ # ";" not necessary on python 
+                    params = (id.lower(), f"%{id.lower()}%", id.lower(), id.lower(), id.lower()) # '?' are placeholders, % are wildcards, before and after it may contain other characters, that's why 
+                    cat_df = pd.read_sql(query, con, params=params) 
+                    return cat_df
+            except Exception as e:
+                print(f"Error in the query: {e}")
+                return pd.DataFrame()
+            
+        elif re.match(r"^https?://[a-zA-Z0-9.-]+(?:\:\d+)?/blazegraph(?:/[\w\-./]*)?/sparql$", path):
+            endpoint= self.dbPathOrUrl
+            query = f"""
+            PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            PREFIX schema: <https://schema.org/>
+            
+            SELECT ?internalId ?title ?issn ?eissn ?languages ?publisher ?seal ?license ?apc
+            WHERE {{
+                ?internalId rdf:type schema:Periodical .
+                ?internalId schema:title ?title .
+                ?internalId schema:issn ?issn .
+                ?internalId schema:eissn ?eissn .
+                ?internalId schema:inLanguage ?languages .
+                ?internalId schema:publisher ?publisher .
+                ?internalId schema:license ?license .
+                ?internalId schema:isAccessibleForFree ?apc .
+                ?internalId schema:doajSeal ?seal .
+                
+                FILTER (
+                    LCASE(?title) = LCASE("{id}") || 
+                    LCASE(?issn) = LCASE("{id}") ||
+                    LCASE(?eissn) = LCASE("{id}")
+                )
+            }}
+            """
+            # query SPARQL
+            try:
+                df = get(endpoint, query, True)
+                return df
+            except Exception as e:
+                print(f"Error in SPARQL query: {e}")
+                return pd.DataFrame()
+        else: 
+            return pd.DataFrame()
+
 
 class CategoryQueryHandler(QueryHandler):
+    def __init__(self):
+        super().__init__()
+
     def getAllCategories() -> pd.DataFrame: # Rumana
         pass
     def getAllAreas() -> pd.DataFrame: # Martina
         pass
-    def getCategoriesWithQuartile(quartiles:set[str]) -> pd.DataFrame: # Nico
+    def getCategoriesWithQuartile(self, quartiles:set[str]) -> pd.DataFrame: # Nico
         pass
-    def getCategoriesAssignedToAreas(area_ids: set[str]) -> pd.DataFrame: # Ila
-        pass
+    
+    def getCategoriesAssignedToAreas(self, area_ids: set[str]) -> pd.DataFrame: # ! Ila, done, needs to be tested
+        categories = []
+        path = self.dbPathOrUrl
+        try:
+            # sqlite db
+            with sqlite3.connect(path) as con:
+                # for every area_id
+                for area_id in area_ids:
+                    query = """
+                        SELECT area, category
+                        FROM Category
+                        WHERE area = ?
+                        ;
+                    """
+                    # query
+                    df = pd.read_sql(query, con, params=(area_id,)) # there is a comma because it is a tuple
+                    categories.append(df)
+            # merge all the obtained df
+            all_categories = pd.concat(categories, ignore_index=True)
+            return all_categories
+        except Exception as e:
+            print(f"Error in the query: {e}")
+            return pd.DataFrame()  
+        
     def getAreasAssignedToCategories(categrory_ids: set[str]) -> pd.DataFrame: # Rumana
         pass
 
-class JournalQueryHandler(): # all the methods return a DataFrame
-    pass
+class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
+    def __init__():
+        super().__init__()
     def getAllJournals(): # Martina
         pass
     def getJournalsWithTitle(self, partialTitle: str): # Nico
         pass
-    def getJournalsPublishedBy(self, partialName: str): #Ila
-        pass
-    def getJournalsWothLicense(self, licenses: set[str]): # Rumana
+    def getJournalsPublishedBy(self, partialName: str): # ! Ila done, needs to be tested 
+        endpoint = self.dbPathOrUrl
+        # i dind't use the prefix for dc, check
+        query = f"""
+        PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        PREFIX schema: <https://schema.org/>
+
+        SELECT ?internalId ?title ?issn ?eissn ?languages ?publisher ?seal ?license ?apc
+        WHERE {{
+            ?internalId rdf:type schema:Periodical .
+            ?internalId schema:title ?title .
+            ?internalId schema:issn ?issn .
+            ?internalId schema:eissn ?eissn .
+            ?internalId schema:inLanguage ?languages .
+            ?internalId schema:publisher ?publisher .
+            ?internalId schema:license ?license .
+            ?internalId schema:isAccessibleForFree ?apc .
+            ?internalId schema:doajSeal ?seal .
+
+            FILTER CONTAINS(LCASE(STR(?publisher)), LCASE("{partialName}"))
+        }}
+        """
+        try:
+            df = get(endpoint, query, True)
+            return df
+        except Exception as e:
+            print(f"Error in SPARQL query: {e}")
+            return pd.DataFrame()
+
+    def getJournalsWithLicense(self, licenses: set[str]): # Rumana
         pass
     def JournalsWithAPC(): # Martina
         pass
@@ -316,13 +418,17 @@ class JournalQueryHandler(): # all the methods return a DataFrame
         pass
         
 class BasicQueryEngine(object):
-    pass
-    def cleanJournalHandlers() -> bool:  # Rumana
-        pass
-    def cleanCategoryHanders() -> bool: # Ila
-        pass
-# here I think we need to create the graphs and 'clean' the DF to see if there are doubles, if the years (and numbers in general) are floats, etc. 
-    
+    def __init__(self): # Ila, done
+        self.journalQuery= []
+        self.categoryQuery= []
+
+    def cleanJournalHandlers(self) -> bool:
+        self.journalQuery= []
+        return True
+    def cleanCategoryHandlers(self) -> bool: #  Ila, done
+        self.categoryQuery= []
+        return True
+        
     def addJournalHandler(handler: JournalQueryHandler) -> bool: # Martina
         pass
     def addCategoryHandler(handler: CategoryQueryHandler) -> bool: # Nico 
@@ -360,5 +466,4 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
         pass
     def getDiamondJournalsAreasAmdCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
         pass
-
 
