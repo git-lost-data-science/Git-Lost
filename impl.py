@@ -291,68 +291,30 @@ class CategoryUploadHandler(UploadHandler):
 # QUERY HANDLER 
 class QueryHandler(Handler): 
     def __init__(self):
-        super().__init__()  
+        super().__init__()
 
-# ? getById: it returns a data frame with all the identifiable entities (i.e. journals, categories, and areas) matching the input identifier (i.e. maximum one entity if there exists one with the input id).
-    def getById(self, id: str) -> pd.DataFrame: 
-        path = self.dbPathOrUrl
-        if path.endswith(".db"): # _ Ila, it works T.T so happy, returns a df. It returns everything from the table Category. 
-            try:
-                with sqlite3.connect(path) as con: # LIKE is used to match partial strings 
-                    query = """
-                        SELECT * FROM Category
-                        WHERE LOWER([internal-id]) = LOWER(?)
-                           OR LOWER([journal-ids]) LIKE LOWER(?) 
-                           OR LOWER([category]) = LOWER(?) 
-                           OR LOWER([quartile]) = LOWER(?)
-                           OR LOWER([area]) = LOWER(?)
-                    """ # ";" not necessary on python 
-                    params = (id.lower(), f"%{id.lower()}%", id.lower(), id.lower(), id.lower()) # '?' are placeholders, % are wildcards, before and after it may contain other characters 
-                    cat_df = pd.read_sql(query, con, params=params) 
-                    return cat_df 
-            except Exception as e:
-                print(f"Error in the query: {e}")
-                return pd.DataFrame()
-            
-        elif re.match(r"^https?://[a-zA-Z0-9.-]+(?:\:\d+)?/blazegraph(?:/[\w\-./]*)?/sparql$", path): # ! Ila: needs to be tested (again)
-            endpoint = self.dbPathOrUrl
-            query = f"""
-                PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-                PREFIX schema: <https://schema.org/>
-                PREFIX res: <https://github.com/git-lost-data-science/res/>
-
-                SELECT ?internalId ?title ?issn ?eissn ?languages ?publisher ?seal ?license ?apc
-                WHERE {{
-                    ?internalId rdf:type schema:Periodical .
-                    
-                    OPTIONAL {{ ?internalId schema:name ?title . }}
-                    OPTIONAL {{ ?internalId schema:issn ?issn . }}
-                    OPTIONAL {{ ?internalId schema:eissn ?eissn . }}
-                    OPTIONAL {{ ?internalId schema:inLanguage ?languages . }}
-                    OPTIONAL {{ ?internalId schema:publisher ?publisher . }}
-                    OPTIONAL {{ ?internalId schema:license ?license . }}
-                    OPTIONAL {{ ?internalId schema:isAccessibleForFree ?apc . }}
-                    OPTIONAL {{ ?internalId schema:hasDOAJSeal ?seal . }}
-
-                    FILTER (
-                        LCASE(STR(?title)) = LCASE("{id}") || 
-                        LCASE(STR(?issn)) = LCASE("{id}") ||
-                        LCASE(STR(?eissn)) = LCASE("{id}")
-                    )
-                }}
-            """
-            try:
-                df = get(endpoint, query, True)
-                return df
-            except Exception as e:
-                print(f"Error in SPARQL query: {e}")
-                return pd.DataFrame()
-            else: 
-                return pd.DataFrame()
+    def getById(self, _: str) -> pd.DataFrame: # Ila
+        ... # to define later, separately
 
 class CategoryQueryHandler(QueryHandler):
-    def __init__(self):
-        super().__init__()
+    def getById(self, id: str) -> pd.DataFrame: # Ila, it works
+        path= self.dbPathOrUrl
+        try:
+            with sqlite3.connect(path) as con:
+                query = """
+                    SELECT * FROM Category
+                    WHERE LOWER([internal-id]) = LOWER(?)
+                        OR LOWER([journal-ids]) LIKE LOWER(?) 
+                        OR LOWER([category]) = LOWER(?) 
+                        OR LOWER([quartile]) = LOWER(?)
+                        OR LOWER([area]) = LOWER(?)
+                """  
+                params = (id.lower(), f"%{id.lower()}%", id.lower(), id.lower(), id.lower()) # '?' are placeholders, % are wildcards, before and after it may contain other characters 
+                cat_df = pd.read_sql(query, con, params=params) 
+                return cat_df 
+        except Exception as e:
+            print(f"Error in the query: {e}")
+            return pd.DataFrame()
 
     def getAllCategories() -> pd.DataFrame: # Rumana
         try:
@@ -433,27 +395,26 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
     def getJournalsWithTitle(self, partialTitle: str): # Nico
         pass
 
-    def getJournalsPublishedBy(self, partialName: str): # ! Ila done, needs to be tested, need the Journal done 
-        endpoint = self.dbPathOrUrl
-        # i dind't use the prefix for dc, check
+    def getJournalsPublishedBy(self, partialName: str): # ? Ila : it works
+        endpoint = self.getDbPathOrUrl()        
         query = f"""
-        PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        PREFIX res:    <https://github.com/git-lost-data-science/res/>
+        PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
-        PREFIX res: <https://github.com/git-lost-data-science/res/>
 
-        SELECT ?internalId ?title ?issn ?eissn ?languages ?publisher ?seal ?license ?apc
+        SELECT ?title ?issn ?eissn ?publisher ?languages ?seal ?license ?apc
         WHERE {{
-            ?internalId rdf:type schema:Periodical .
-            ?internalId schema:name ?title .
-            ?internalId schema:issn ?issn .
-            ?internalId schema:eissn ?eissn .
-            ?internalId schema:inLanguage ?languages .
-            ?internalId schema:publisher ?publisher .
-            ?internalId schema:license ?license .
-            ?internalId schema:isAccessibleForFree ?apc .
-            ?internalId schema:hasDOAJSeal ?seal .
-
-            FILTER CONTAINS(LCASE(STR(?publisher)), LCASE("{partialName}"))
+            ?s rdf:type schema:Periodical .
+            ?s schema:publisher ?o .
+            ?s schema:name ?title .
+            ?s schema:issn ?issn .
+            ?s schema:eissn ?eissn .
+            ?s schema:publisher ?publisher .
+            ?s schema:inLanguage ?languages .
+            ?s schema:hasDOAJSeal ?seal .
+            ?s schema:license ?license .
+            ?s schema:isAccessibleForFree ?apc .
+            FILTER CONTAINS(LCASE(STR(?o)), LCASE("{partialName}"))
         }}
         """
         try:
@@ -462,6 +423,7 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
         except Exception as e:
             print(f"Error in SPARQL query: {e}")
             return pd.DataFrame()
+
 
     def getJournalsWithLicense(self, licenses: set[str]): # Rumana
         pass
