@@ -25,7 +25,7 @@ class TypeMismatchError(Exception):
 
 class IdentifiableEntity:
     def __init__(self, id: object):
-        if not (isinstance(id, list) and all(isinstance(value, str) for value in id)) or not isinstance(id, str):
+        if not (isinstance(id, list) or not (isinstance(id, str)) and all(isinstance(value, str) for value in id)):
             raise TypeMismatchError("a list of strings or a string", id)
         self.id: list[str] | str = id 
 
@@ -141,11 +141,11 @@ class UploadHandler(Handler):
     # def __init__(self, dbPathOrUrl): # Adding this I think it actually specifies what it takes (dbPathOrUrl)
     #     super().__init__(dbPathOrUrl)  # ? I think we don't need this actually because it inherently inherits Handler's parameters
 
-    def pushDataToDb(self, dbPathOrUrl: str): #-> bool: 
-        if dbPathOrUrl.endswith(".json"):  # Here I changed it to dbPathOrUrl for better reconnection between classes (imo), but maybe even better would be to use self.getDbPathOrUrl
-            categories_df = self._json_file_to_df(dbPathOrUrl) # ? running the function without directly requiring the creation of the instance of a class 
+    def pushDataToDb(self, path: str): #-> bool: 
+        if path.endswith(".json"):  # Here I changed it to dbPathOrUrl for better reconnection between classes (imo), but maybe even better would be to use self.getDbPathOrUrl
+            categories_df = self._json_file_to_df(path) # ? running the function without directly requiring the creation of the instance of a class 
             try: 
-                with sqlite3.connect(self.dbPathOrUrl()) as con:    
+                with sqlite3.connect(self.dbPathOrUrl) as con:    
                     categories_df.to_sql("Categories", con, if_exists="replace", index=False)
                     con.commit()
                 return True
@@ -153,8 +153,8 @@ class UploadHandler(Handler):
                 print(f"Error uploading data: {e}")
                 return False  
                  
-        elif dbPathOrUrl.endswith(".csv"): # ? This case MUST be included because the file can't just be assumed to be CSV
-            jou_graph = self._csv_file_to_graph(dbPathOrUrl)
+        elif path.endswith(".csv"): # ? This case MUST be included because the file can't just be assumed to be CSV
+            jou_graph = self._csv_file_to_graph(path)
             #graph_endp = "http://127.0.0.1:9999/blazegraph/sparql"
             try:
                 store = SPARQLUpdateStore()
@@ -192,11 +192,14 @@ class JournalUploadHandler(UploadHandler):
     
         # referencing the attributes:
         title = rdflib.URIRef("https://schema.org/name")
-        languages = rdflib.URIRef ("https://schema.org/inLanguage") # (superseded /Language)
+        languages = rdflib.URIRef("https://schema.org/inLanguage") # (superseded /Language)
+        issn = rdflib.URIRef("https://schema.org/issn")
+        eissn = rdflib.URIRef("https://schema.org/eissn") # invented
         publisher = rdflib.URIRef("https://schema.org/publisher")
-        seal = rdflib.URIRef("http://doaj.org/static/doaj/doajArticles.xsd")    
+        seal = rdflib.URIRef("https://schema.org/hasDOAJSeal") # invented
         license = rdflib.URIRef("https://schema.org/license")
         apc = rdflib.URIRef("https://schema.org/isAccessibleForFree") # this is a boolean value in theory so it should work.
+        
         
         # referencing the relations: 
         hasCategory = rdflib.URIRef("http://purl.org/dc/terms/isPartOf")
@@ -208,6 +211,8 @@ class JournalUploadHandler(UploadHandler):
                            dtype={
                                   'Journal title': 'str', 
                                   'Languages in which the journal accepts manuscripts': 'str', 
+                                  'Journal ISSN (print version)': 'str',
+                                  'Journal EISSN (online version)': 'str',
                                   'Publisher': 'str',
                                   'DOAJ Seal': 'str',
                                   'Journal license': 'str',
@@ -216,6 +221,8 @@ class JournalUploadHandler(UploadHandler):
         
         journals = journals.rename(columns={'Journal title': 'title', 
                                              'Languages in which the journal accepts manuscripts': 'languages', 
+                                             'Journal ISSN (print version)': 'issn',
+                                             'Journal EISSN (online version)': 'eissn',
                                              'Publisher': 'publisher',
                                              'DOAJ Seal': 'seal',
                                              'Journal license': 'license',
@@ -225,7 +232,7 @@ class JournalUploadHandler(UploadHandler):
         journals['apc'] = journals['apc'].str.lower().map({'yes': True,'no': False}).fillna(False).astype('bool')
         journals['seal'] = journals['seal'].str.lower().map({'yes': True, 'no': False}).fillna(False).astype('bool')
 
-        base_url = "https://github.com/git-lost-data-science/res"
+        base_url = "https://github.com/git-lost-data-science/res/"
             
         journals_int_id = {}
         for idx, row in journals.iterrows():
@@ -238,11 +245,15 @@ class JournalUploadHandler(UploadHandler):
             j_graph.add((subj, rdflib.RDF.type, Journal))
             j_graph.add((subj, title, rdflib.Literal(row['title'])))
             j_graph.add((subj, languages, rdflib.Literal(row['languages'].split(','))))
+            j_graph.add((subj, issn, rdflib.Literal(row['issn'])))
+            j_graph.add((subj, eissn, rdflib.Literal(row['eissn'])))
             j_graph.add((subj, publisher, rdflib.Literal(row['publisher'])))
-            j_graph.add((subj, seal, rdflib.Literal(row['seal'], datatype=rdflib.XSD.boolean)))    
+            j_graph.add((subj, seal, rdflib.Literal(row['seal'])))    
             j_graph.add((subj, license, rdflib.Literal(row['license'])))
-            j_graph.add((subj, apc, rdflib.Literal(row['apc'], datatype=rdflib.XSD.boolean))) 
-            # THIS PART IS ADDED AFTERWARDS --    
+            j_graph.add((subj, apc, rdflib.Literal(row['apc']))) 
+            # THIS PART IS ADDED AFTERWARDS --   
+            j_graph.add((subj,rdflib.RDF.type, Category)) 
+            j_graph.add((subj, rdflib.RDF.type, Area))
             j_graph.add((subj, hasCategory, Category)) # category_int_id[row['categories']]))  # HERE I'm technically missing just the @quartile
             j_graph.add((subj, hasArea, Area)) # area_int_id[row['area']]))
             # -- THIS PART IS ADDED AFTWERWARDS. 
@@ -331,7 +342,7 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
         try:
             endpoint = self.getDbPathOrUrl()
             journal_query = '''
-            PREFIX res:    <https://comp-data.github.io/res/>
+            PREFIX res:    <https://github.com/git-lost-data-science/res/>
             PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
@@ -359,7 +370,7 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
         try:
             endpoint = self.getDbPathOrUrl()
             jouAPC_query = '''
-            PREFIX res:    <https://comp-data.github.io/res/>
+            PREFIX res:    <https://github.com/git-lost-data-science/res/>
             PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
