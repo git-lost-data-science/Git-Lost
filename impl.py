@@ -10,7 +10,7 @@ import rdflib
 import pandas as pd  # * DataFrame, Series
 import sqlite3 # * connect
 from rdflib.plugins.stores.sparqlstore import SPARQLUpdateStore
-from sparql_dataframe import get 
+import sparql_dataframe 
 from rdflib import RDF, URIRef, Literal, Graph
 
 
@@ -316,7 +316,7 @@ class CategoryQueryHandler(QueryHandler):
             print(f"Error in the query: {e}")
             return pd.DataFrame()
 
-    def getAllCategories() -> pd.DataFrame: # Rumana
+    def getAllCategories(self) -> pd.DataFrame: # Rumana
         try:
             with sqlite3.connect(self.getDbPathOrUrl()) as con: 
                 query = "SELECT DISTINCT category FROM Category;"
@@ -326,7 +326,7 @@ class CategoryQueryHandler(QueryHandler):
             print(f"Connection to SQL database failed due to error: {e}") 
             return pd.DataFrame()
             
-    def getAllAreas() -> pd.DataFrame: # Martina
+    def getAllAreas(self) -> pd.DataFrame: # Martina
         # SELECT area FROM categories; This is the query in itself. 
         # TO BE MODIFIED in order to not have repetitions (so only the first instance is restituted).
         try:
@@ -368,9 +368,9 @@ class CategoryQueryHandler(QueryHandler):
         pass
 
 class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
-    def __init__():
+    def __init__(self):
         super().__init__()
-    def getAllJournals(): # Martina
+    def getAllJournals(self): # Martina
         try:
             endpoint = self.getDbPathOrUrl()
             journal_query = '''
@@ -418,7 +418,7 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
         }}
         """
         try:
-            df = get(endpoint, query, True)
+            df = sparql_dataframe.get(endpoint, query, True)
             return pd.DataFrame(df)
         except Exception as e:
             print(f"Error in SPARQL query: {e}")
@@ -427,7 +427,7 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
 
     def getJournalsWithLicense(self, licenses: set[str]): # Rumana
         pass
-    def JournalsWithAPC(): # Martina
+    def JournalsWithAPC(self): # Martina
         try:
             endpoint = self.getDbPathOrUrl()
             jouAPC_query = '''
@@ -466,7 +466,7 @@ class BasicQueryEngine(object):
     def cleanCategoryHandlers(self) -> bool: #  ? Ila, done
         self.categoryQuery= []
         return True       
-    def addJournalHandler(handler: JournalQueryHandler) -> bool: # Martina
+    def addJournalHandler(self, handler: JournalQueryHandler) -> bool: # Martina
         try:
             self.journalQuery.append(handler)
             return True
