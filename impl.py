@@ -11,8 +11,8 @@ import pandas as pd  # * DataFrame, Series
 import sqlite3 # * connect
 from rdflib.plugins.stores.sparqlstore import SPARQLUpdateStore
 import sparql_dataframe 
-from rdflib import RDF, URIRef, Literal, Graph
 
+# ! BLAZEGRAPH: java -server -Xmx1g -jar blazegraph.jar
 
 class TypeMismatchError(Exception):
     def __init__(self, expected_type_description: str, obj: object):
@@ -20,7 +20,7 @@ class TypeMismatchError(Exception):
         preposition = "an" if actual_type_name[0] in "aeiou" else "a"
         super().__init__(f"Expected {expected_type_description}, got {preposition} {actual_type_name}.")
 
-class IdentifiableEntity():
+class IdentifiableEntity:
     def __init__(self, id: object):
         if not (isinstance(id, list) and all(isinstance(value, str) for value in id)) or not isinstance(id, str):
             raise TypeMismatchError("a list of strings or a string", id)
@@ -253,7 +253,6 @@ class JournalUploadHandler(UploadHandler):
 
 
 class CategoryUploadHandler(UploadHandler): 
-
     def _json_file_to_df(self, json_file: str) -> pd.DataFrame: 
         with open(json_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -287,7 +286,7 @@ class CategoryUploadHandler(UploadHandler):
             categories_df = pd.DataFrame(rows)
             return categories_df 
 
-# ! NOTE: TABLE NAME IS 'Category'
+# ! NOTE: TABLE NAME IS 'Categories' NOT 'Category'
 # QUERY HANDLER 
 class QueryHandler(Handler): 
     def __init__(self):
@@ -295,14 +294,16 @@ class QueryHandler(Handler):
 
     def getById(self, _: str) -> pd.DataFrame: # Ila
         ... # to define later, separately
+        # Both specific ID methods should be called here, returning a dataframe with all identifiable entities
+        # ? Nico has renamed the subclass methods so then it is very clear which getById method is used
 
 class CategoryQueryHandler(QueryHandler):
-    def getById(self, id: str) -> pd.DataFrame: # Ila, it works
-        path= self.dbPathOrUrl
+    def getCategoriesById(self, id: str) -> pd.DataFrame: # Ila, it works
+        path = self.getDbPathOrUrl()
         try:
             with sqlite3.connect(path) as con:
                 query = """
-                    SELECT * FROM Category
+                    SELECT * FROM Categories
                     WHERE LOWER([internal-id]) = LOWER(?)
                         OR LOWER([journal-ids]) LIKE LOWER(?) 
                         OR LOWER([category]) = LOWER(?) 
@@ -320,7 +321,7 @@ class CategoryQueryHandler(QueryHandler):
         try:
             with sqlite3.connect(self.getDbPathOrUrl()) as con: 
                 query = "SELECT DISTINCT category FROM Category;"
-                df = pd.read_sql(query, con) #this sends the query to the dbase and stores the results in df
+                df = pd.read_sql(query, con) # this sends the query to the dbase and stores the results in df
                 return df
         except Exception as e:
             print(f"Connection to SQL database failed due to error: {e}") 
@@ -331,15 +332,39 @@ class CategoryQueryHandler(QueryHandler):
         # TO BE MODIFIED in order to not have repetitions (so only the first instance is restituted).
         try:
             with sqlite3.connect(self.getDbPathOrUrl()) as con:
-                q2="SELECT DISTINCT area FROM Category;" # DISTINCT allows to avoid showing duplicates.
+                q2 = "SELECT DISTINCT area FROM Category;" # DISTINCT allows to avoid showing duplicates.
                 q2_df = pd.read_sql(q2, con)
                 return q2_df
         except Exception as e:
                 print(f"Connection to SQL database failed due to error: {e}") 
                 return pd.DataFrame() # in order to always return a DataFrame object, even if the queries fails for some reason.   
-    
-    def getCategoriesWithQuartile(self, quartiles:set[str]) -> pd.DataFrame: # Nico
-        pass
+
+    def getCategoriesWithQuartile(self, quartiles: set[str]) -> pd.DataFrame: # ! Nico is finished this method, requires testing
+        # ~ find out the exceptions that can be raised !!!
+        # ~ function structure: 1. query, try, except
+
+        # * 1. Remove 'path'
+        # * 2. Take code after the df assignment out of the try block
+
+        path = self.getDbPathOrUrl() # a safer way to access the path than directly accessing the variable
+        categories = []
+        query = """
+            SELECT quartile, category
+            FROM Categories
+            WHERE quartile = ?
+            ;
+        """
+        try:
+            with sqlite3.connect(path) as con:
+                for quartile in quartiles: # ? Testing one quartile at a time, addresses the blank case
+                    quartile_df = pd.read_sql(query, con, params=(quartile,)) 
+        except Exception as e:
+            print(f"Error in the query: {e}") 
+            return pd.DataFrame()  
+        else:
+            categories.append(quartile_df)
+            all_categories = pd.concat(categories, ignore_index=True)
+            return all_categories
 
     def getCategoriesAssignedToAreas(self, area_ids: set[str]) -> pd.DataFrame: # ? Ila, it works T.T
         path = self.dbPathOrUrl
@@ -367,9 +392,13 @@ class CategoryQueryHandler(QueryHandler):
     def getAreasAssignedToCategories(categrory_ids: set[str]) -> pd.DataFrame: # Rumana
         pass
 
-class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
+class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
     def __init__(self):
         super().__init__()
+
+    def getJournalsById(self, id: str) -> pd.DataFrame: # ! I (Nico) will do this method
+        pass
+
     def getAllJournals(self): # Martina
         try:
             endpoint = self.getDbPathOrUrl()
@@ -392,8 +421,32 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
             print(f"Connection to SQL database failed due to error: {e}") 
             return pd.DataFrame()
     
-    def getJournalsWithTitle(self, partialTitle: str): # Nico
-        pass
+    def getJournalsWithTitle(self, partialTitle: str): # TODO Nico: Test the method! Blazegraph continues to fail...
+        query = f"""
+        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        PREFIX schema: <https://schema.org/>
+
+        SELECT ?internalId ?title ?issn ?eissn ?languages ?publisher ?seal ?license ?apc
+        WHERE {{ # ? using the standard parameters required
+            ?internalId rdf:type schema:Periodical .
+            ?internalId schema:title ?title .
+            ?internalId schema:issn ?issn .
+            ?internalId schema:eissn ?eissn .
+            ?internalId schema:inLanguage ?languages .
+            ?internalId schema:publisher ?publisher .
+            ?internalId schema:license ?license .
+            ?internalId schema:isAccessibleForFree ?apc .
+            ?internalId schema:doajSeal ?seal .
+
+            FILTER CONTAINS(LCASE(STR(?title)), LCASE("{partialTitle}")) # ? matching the title and the partial title
+        }}
+        """
+        try:
+            titles_df = sparql_dataframe.get(self.dbPathOrUrl, query, True)
+            return titles_df
+        except Exception as e:
+            print(f"Error in SPARQL query: {e}")
+            return pd.DataFrame()
 
     def getJournalsPublishedBy(self, partialName: str): # ? Ila : it works
         endpoint = self.getDbPathOrUrl()        
@@ -423,7 +476,6 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
         except Exception as e:
             print(f"Error in SPARQL query: {e}")
             return pd.DataFrame()
-
 
     def getJournalsWithLicense(self, licenses: set[str]): # Rumana
         pass
@@ -455,33 +507,39 @@ class JournalQueryHandler(QueryHandler): # all the methods return a DataFrame
     def JournalsWithDOAJSeal(): # Nico
         pass
         
-class BasicQueryEngine(object):
-    def __init__(self, journalQuery, categoryQuery): # ? Ila, done
-        self.journalQuery= []
-        self.categoryQuery= []
+class BasicQueryEngine:
+    def __init__(self): # ? No need for any parameters to be passed in
+        self.journalQueryHandlers = [] # ? Nico changed the names for less ambiguity
+        self.categoryQueryHandlers = []
 
     def cleanJournalHandlers(self) -> bool:
-        self.journalQuery= []
+        self.journalQueryHandlers = []
         return True
+    
     def cleanCategoryHandlers(self) -> bool: #  ? Ila, done
-        self.categoryQuery= []
+        self.categoryQueryHandlers = []
         return True       
-    def addJournalHandler(self, handler: JournalQueryHandler) -> bool: # Martina
+    
+    def addJournalHandler(self, handler: JournalQueryHandler) -> bool: # ? Martina, done
         try:
-            self.journalQuery.append(handler)
+            self.journalQueryHandlers.append(handler)
             return True
         except Exception as e:
             print(f"Error loading methods due to: {e}")
             return False # appends the journal handler to the journal handlers
             
-    def addCategoryHandler(handler: CategoryQueryHandler) -> bool: # Nico 
-        pass # appends the category handlers to the categoryQuery
+    def addCategoryHandler(self, handler: CategoryQueryHandler) -> bool: # ? Nico, done
+        try:
+            self.categoryQueryHandlers.append(handler)
+            return True
+        except Exception as e:
+            print(f"Error loading methods due to the following: {e}")
+            return False # appends the category handlers to the categoryQuery
 
-
-    def getEntityById(id:str) -> Optional[IdentifiableEntity]: # Rumana
+    def getEntityById(id: str) -> Optional[IdentifiableEntity]: # Rumana
         pass
 
-    def getAllJournals(self) -> list[Journal]:  # ! Ila, to be tested
+    def getAllJournals(self) -> list[Journal]: # ! Ila, to be tested
         all_data = []
 
         for journal in self.journalQuery:  # it looks at all the queries in the list journalQuery
@@ -532,10 +590,10 @@ class BasicQueryEngine(object):
 
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
     pass
-    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]): # Rumana
+    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]): # Nico
         pass
     def getJournalsInAreasWithLicense(self, areas_ids:set[str]): # Ila 
         pass
-    def getDiamondJournalsAreasAmdCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
+    def getDiamondJournalsAreasAndCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
         pass
 
