@@ -288,8 +288,16 @@ class QueryHandler(Handler):
     def __init__(self):
         super().__init__()
 
-    def getById(self, _: str) -> pd.DataFrame: # Ila
-        ... # to define later, separately
+    def getById(self, _: str) -> pd.DataFrame: # Ila, it should return a pd.DataFrame. CHECK
+        if self.getCategoriesById(id):
+            return (self.getCategoriesById(id), Category)
+        elif self.getAreasById(id):
+            return (self.getAreasById(id), Area)
+        elif self.getJournalsById(id):
+            return (self.JournalsById(id), Journal)
+        else:
+            return pd.DataFrame, None 
+        # to define later, separately
         # Both specific ID methods should be called here, returning a dataframe with all identifiable entities
 class CategoryQueryHandler(QueryHandler):
     def getCategoriesById(self, id: str) -> pd.DataFrame: # Ila
@@ -306,10 +314,22 @@ class CategoryQueryHandler(QueryHandler):
                 return cat_df 
         except Exception as e:
             print(f"Error in the query: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame
 
-    def getAreasById(self, id:str) -> pd.DataFrame:
-        pass
+    def getAreasById(self, id:str) -> pd.DataFrame: #Ila
+        path= self.dbPathOrUrl
+        try:
+            with sqlite3.connect(path) as con:
+                query = """
+                    SELECT * FROM Category
+                        OR LOWER([area]) = LOWER(?)
+                """  
+                params = (f"%{id.lower()}%") # '?' are placeholders, % are wildcards, before and after it may contain other characters 
+                cat_df = pd.read_sql(query, con, params=params).drop_duplicates()
+                return cat_df 
+        except Exception as e:
+            print(f"Error in the query: {e}")
+            return pd.DataFrame       
 
     def getAllCategories(self) -> pd.DataFrame: # Rumana
         try:
@@ -319,7 +339,7 @@ class CategoryQueryHandler(QueryHandler):
                 return df
         except Exception as e:
             print(f"Connection to SQL database failed due to error: {e}") 
-            return pd.DataFrame()
+            return pd.DataFrame
             
     def getAllAreas(self) -> pd.DataFrame: # Martina
         # SELECT area FROM categories; This is the query in itself. 
@@ -331,7 +351,7 @@ class CategoryQueryHandler(QueryHandler):
                 return q2_df
         except Exception as e:
                 print(f"Connection to SQL database failed due to error: {e}") 
-                return pd.DataFrame() # in order to always return a DataFrame object, even if the queries fails for some reason.   
+                return pd.DataFrame # in order to always return a DataFrame object, even if the queries fails for some reason.   
 
     def getCategoriesWithQuartile(self, quartiles: set[str]={"Q1", "Q2", "Q3", "Q4"}) -> pd.DataFrame: # ! Nico is finished this method, requires testing
         path = self.getDbPathOrUrl() # a safer way to access the path than directly accessing the variable
@@ -349,7 +369,7 @@ class CategoryQueryHandler(QueryHandler):
                     print(quartile)
         except Exception as e:
             print(f"Error in the query: {e}") 
-            return pd.DataFrame()  
+            return pd.DataFrame  
         else:
             categories.append(quartile_df)
             all_categories = pd.concat(categories, ignore_index=True).drop_duplicates()
@@ -376,7 +396,7 @@ class CategoryQueryHandler(QueryHandler):
                 return df
         except Exception as e:
             print(f"Error in the query: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame
     
     def getAreasAssignedToCategories(self, category_ids: set[str]) -> pd.DataFrame: # ? Nico is doing this one now...
         path = self.getDbPathOrUrl()
@@ -396,7 +416,7 @@ class CategoryQueryHandler(QueryHandler):
                 return areas_df
         except Exception as e:
             print(f"Error in the query: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame
 
 class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
     def __init__(self):
@@ -428,7 +448,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             return titles_df
         except Exception as e:
             print(f"Error in the SPARQL query: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame
 
     def getAllJournals(self): # Martina
         try:
@@ -450,7 +470,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         
         except Exception as e:
             print(f"Error in SPARQL query due to: {e}") 
-            return pd.DataFrame()
+            return pd.DataFrame
         
     def getJournalsWithTitle(self, partialTitle: str): # ! Nico: Test the method! Blazegraph continues to fail...
         query = f"""
@@ -477,7 +497,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             return titles_df
         except Exception as e:
             print(f"Error in the SPARQL query: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame
 
     def getJournalsPublishedBy(self, partialName: str): # ? Ila : it works
         endpoint = self.getDbPathOrUrl()        
@@ -506,31 +526,31 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             return pd.DataFrame(df)
         except Exception as e:
             print(f"Error in SPARQL query: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame
             
     def getJournalsWithLicense(self, licenses: set[str]): # Rumana
          if not licenses:
-            return pd.DataFrame()
-        try:
-            endpoint = self.getDbPathOrUrl()
-            
-            licenses_filter = " || ".join([f'?license = "{license}"' for license in licenses])
-            query = f'''
-            PREFIX schema: <https://schema.org/>
-            SELECT ?journal ?title ?license
-            WHERE {{
-                ?journal rdf:type schema:Periodical .
-                ?journal schema:name ?title .
-                ?journal schema:license ?license .
-                FILTER ({licenses_filter})
-            }}
-            '''
-            journal_df = sparql_dataframe.get(endpoint, query, True)
-            return journal_df
-
-        except Exception as e:
-            print(f"Connection to SPARQL endpoint failed due to error: {e}") 
-            return pd.DataFrame()
+            return pd.DataFrame
+            try:
+                endpoint = self.getDbPathOrUrl()
+                
+                licenses_filter = " || ".join([f'?license = "{license}"' for license in licenses])
+                query = f'''
+                PREFIX schema: <https://schema.org/>
+                SELECT ?journal ?title ?license
+                WHERE {{
+                    ?journal rdf:type schema:Periodical .
+                    ?journal schema:name ?title .
+                    ?journal schema:license ?license .
+                    FILTER ({licenses_filter})
+                }}
+                '''
+                journal_df = sparql_dataframe.get(endpoint, query, True)
+                return journal_df
+    
+            except Exception as e:
+                print(f"Connection to SPARQL endpoint failed due to error: {e}") 
+                return pd.DataFrame
             
     def getJournalsWithAPC(self): # Martina
         try:
@@ -558,7 +578,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         
         except Exception as e:
             print(f"Error in SPARQL query due to: {e}") 
-            return pd.DataFrame()
+            return pd.DataFrame
     
     def JournalsWithDOAJSeal(self): # ? Nico, done, untested
         try:
@@ -580,7 +600,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         
         except Exception as e:
             print(f"The query was unsuccessful due to the following error: {e}") 
-            return pd.DataFrame()
+            return pd.DataFrame
         
 class BasicQueryEngine:
     def __init__(self, journalQuery, categoryQuery): # ? Ila, done
@@ -610,7 +630,21 @@ class BasicQueryEngine:
             return False # appends the category handlers to the categoryQuery
 
     def getEntityById(id: str) -> Optional[IdentifiableEntity]: # Rumana
-        pass
+        # ensure consistency of return values! this may need to be transformed into a tuple
+        entity_df, idType = entity # entity_df is a dataframe, idType is the type of the object
+        if isinstance(idType, Category):
+            for _, row in entity_df.iterrows(): # what if more than one value exists? Nico is concerned
+                return Category(row.get("category"), row.get("quartile"))
+            # transform the object into a Category
+        elif isinstance(idType, Area):
+            for _, row in entity_df.iterrows():
+                return Area(row.get("area"))
+        elif isinstance(idType, Journal):
+            for _, row in entity_df.iterrows():
+                return Journal(row.get("issn"), row.get("title"), row.get("languages"), row.get("publisher"), 
+                               row.get("seal"), row.get("licence"), row.get("apc"), None, None)
+        else:
+            return None
 
     def getAllJournals(self) -> list[Journal]: # ! Ila, to be tested
         all_data = []
