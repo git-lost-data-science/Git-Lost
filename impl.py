@@ -507,8 +507,31 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         except Exception as e:
             print(f"Error in SPARQL query: {e}")
             return pd.DataFrame()
+            
     def getJournalsWithLicense(self, licenses: set[str]): # Rumana
-        pass
+         if not licenses:
+            return pd.DataFrame()
+        try:
+            endpoint = self.getDbPathOrUrl()
+            
+            licenses_filter = " || ".join([f'?license = "{license}"' for license in licenses])
+            query = f'''
+            PREFIX schema: <https://schema.org/>
+            SELECT ?journal ?title ?license
+            WHERE {{
+                ?journal rdf:type schema:Periodical .
+                ?journal schema:name ?title .
+                ?journal schema:license ?license .
+                FILTER ({licenses_filter})
+            }}
+            '''
+            journal_df = sparql_dataframe.get(endpoint, query, True)
+            return journal_df
+
+        except Exception as e:
+            print(f"Connection to SPARQL endpoint failed due to error: {e}") 
+            return pd.DataFrame()
+            
     def getJournalsWithAPC(self): # Martina
         try:
             endpoint = self.getDbPathOrUrl()
@@ -665,8 +688,44 @@ class BasicQueryEngine:
                 
         return all_journals # 'issn', 'title', 'languages', 'publisher', 'seal', 'licence', 'apc'
 
-    def getJournalsWithLicense(licenses:set[str]) -> list[Journal]: # Rumana
-        pass
+    def getJournalsWithLicense(self, licenses:set[str]) -> list[Journal]: # Rumana
+        try:
+            all_journal_dfs = []
+
+            for handler in self.journalQuery:
+                if isinstance(handler, JournalQueryHandler):
+                    df = handler.getJournalsWithLicense(licenses)
+                    if not df.empty:
+                        all_journal_dfs.append(df)
+
+            if not all_journal_dfs:
+                return []
+
+            db = pd.concat(all_journal_dfs, ignore_index=True).drop_duplicates()
+            db = db[['id', 'title', 'publisher', 'languages', 'license', 'apc', 'seal']].fillna('')
+            # Clean the license column
+            db['license'] = db['license'].str.strip()
+            db = db[db['license'].isin(licenses)]
+
+            result = []
+            for _, row in db.iterrows():
+                journal = Journal(
+                    id=row.get('id'),
+                    title=row.get('title'),
+                    publisher=row.get('publisher'),
+                    languages=row.get('languages').split(',') if row.get('languages') else [],
+                    license=row.get('license'),
+                    apc=row.get('apc'),
+                    seal=row.get('seal')
+                )
+                result.append(journal)
+
+            return result
+
+        except Exception as e:
+            print(f"Error while getting journals by license: {e}")
+            return []
+            
     def getJournalsWithAPC() -> list[Journal]: # Ila 
         all_data = []
 
@@ -741,7 +800,21 @@ class BasicQueryEngine:
         return all_categories
     
     def getAllAreas() -> list[Area]: # Rumana
-        pass
+        try:
+            with sqlite3.connect(self.getDbPathOrUrl()) as con:
+                query = "SELECT DISTINCT area FROM categories;"  # Query to fetch unique areas
+                df = pd.read_sql(query, con)  # Execute the query and store results in a DataFrame
+                
+                areas = []
+                for _, row in df.iterrows():
+                    area = Area(id=row['area'])  # Create Area objects for each unique area
+                    areas.append(area)
+                
+                return areas
+        except Exception as e:
+            print(f"Error fetching areas: {e}")
+            return []
+            
     def getCategoriesWithQuartile(quartiles:set[str]) -> list[Category]: # Ila
         pass
     def getCategoriesAssignedToAreas(self, areas_ids: set[str]) -> list[Category]: # Martina
