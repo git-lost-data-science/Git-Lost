@@ -515,7 +515,7 @@ class BasicQueryEngine(): # To be implemented the journalQuery and categoryQuery
         
         if cat_areas:
             db = pd.concat(cat_areas, ignore_index=True).drop_duplicates()
-            db = db[['internal-ids', 'journal-ids', 'category', 'quartile', 'area']].fillna('')
+            db = db[['internal-id', 'journal-ids', 'category', 'quartile', 'area']].fillna('')
 
             #areas_ids = areas_ids.astype(str).split(',')
             
