@@ -20,7 +20,7 @@ class TypeMismatchError(Exception):
         super().__init__(f"Expected {expected_type_description}, got {preposition} {actual_type_name}.")
 
 class IdentifiableEntity:
-    def __init__(self, id: object): # doesn't work –> requires and instead of or
+    def __init__(self, id: object): 
         if not (isinstance(id, list) and all(isinstance(value, str) for value in id)) and not isinstance(id, str):
             raise TypeMismatchError("a list of strings or a string", id)
         self.id: list[str] | str = id 
@@ -529,26 +529,26 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             return pd.DataFrame
             
     def getJournalsWithLicense(self, licenses: set[str]): # Rumana
-         if not licenses:
+        if not licenses:
             return pd.DataFrame
-            try:
-                endpoint = self.getDbPathOrUrl()
+        try:
+            endpoint = self.getDbPathOrUrl()
                 
-                licenses_filter = " || ".join([f'?license = "{license}"' for license in licenses])
-                query = f'''
-                PREFIX schema: <https://schema.org/>
-                SELECT ?journal ?title ?license
-                WHERE {{
-                    ?journal rdf:type schema:Periodical .
-                    ?journal schema:name ?title .
-                    ?journal schema:license ?license .
-                    FILTER ({licenses_filter})
-                }}
-                '''
-                journal_df = sparql_dataframe.get(endpoint, query, True)
-                return journal_df
+            licenses_filter = " || ".join([f'?license = "{license}"' for license in licenses])
+            query = f'''
+            PREFIX schema: <https://schema.org/>
+            SELECT ?journal ?title ?license
+            WHERE {{
+                ?journal rdf:type schema:Periodical .
+                ?journal schema:name ?title .
+                ?journal schema:license ?license .
+                FILTER ({licenses_filter})
+            }}
+            '''
+            journal_df = sparql_dataframe.get(endpoint, query, True)
+            return journal_df
     
-            except Exception as e:
+        except Exception as e:
                 print(f"Connection to SPARQL endpoint failed due to error: {e}") 
                 return pd.DataFrame
             
@@ -629,7 +629,7 @@ class BasicQueryEngine:
             print(f"Error loading methods due to the following: {e}")
             return False # appends the category handlers to the categoryQuery
 
-    def getEntityById(id: str) -> Optional[IdentifiableEntity]: # Rumana
+    def getEntityById(entity: str) -> Optional[IdentifiableEntity]: # Rumana
         # ensure consistency of return values! this may need to be transformed into a tuple
         entity_df, idType = entity # entity_df is a dataframe, idType is the type of the object
         if isinstance(idType, Category):
@@ -760,9 +760,8 @@ class BasicQueryEngine:
             print(f"Error while getting journals by license: {e}")
             return []
             
-    def getJournalsWithAPC() -> list[Journal]: # Ila 
+    def getJournalsWithAPC(self) -> list[Journal]: # Ila 
         all_data = []
-
         for journal in self.journalQuery:  # it looks at all the queries in the list journalQuery
             if isinstance(journal, JournalQueryHandler):  # checks if it is an instance of the JournalQueryHandler
                 df = journal.getJournalsWithAPC()  # calls the previous method on it
@@ -772,14 +771,14 @@ class BasicQueryEngine:
             db = db[['title', 'issn', 'eissn', 'publisher', 'languages', 'seal', 'license', 'apc']].fillna('') # take these rows from the cleared db 
             result = [
                 Journal(
-                    row['title'],
-                    row['issn'],
-                    row['eissn'],
-                    row['publisher'],
-                    row['languages'],
-                    row['seal'],
-                    row['license'],
-                    row['apc']
+                    row.get('title'),
+                    row.get('issn'),
+                    row.get('eissn'),
+                    row.get('publisher'),
+                    row.get('languages'),
+                    row.get('seal'),
+                    row.get('license'),
+                    row.get('apc')
                 ) for _, row in db.iterrows()
             ]
             return result
@@ -833,7 +832,7 @@ class BasicQueryEngine:
             # steps: first get categories, merge categories if they are mentioned multiple times with different quartiles...
         return all_categories
     
-    def getAllAreas() -> list[Area]: # Rumana
+    def getAllAreas(self) -> list[Area]: # Rumana
         try:
             with sqlite3.connect(self.getDbPathOrUrl()) as con:
                 query = "SELECT DISTINCT area FROM categories;"  # Query to fetch unique areas
@@ -849,8 +848,20 @@ class BasicQueryEngine:
             print(f"Error fetching areas: {e}")
             return []
             
-    def getCategoriesWithQuartile(quartiles:set[str]) -> list[Category]: # Ila
-        pass
+    def getCategoriesWithQuartile(self, quartiles:set[str]) -> list[Category]: # Ila
+        all_data = []
+        for category in self.categoryQuery:  # it looks at all the queries in the list journalQuery
+            if isinstance(category, CategoryQueryHandler):  # checks if it is an instance of the JournalQueryHandler
+                df = category.getCategoriesWithQuartile()  # calls the previous method on it
+                all_data.append(df) # appends the result of that method in a list
+        if all_data:
+            db = pd.concat(all_data, ignore_index=True).drop_duplicates() # we can have more than one df, so let's drop duplicates 
+            db = db[['quartile', 'category']].fillna('') # take these rows from the cleared db 
+            result = [Category(row.get('quartile'),row.get('category')) for _, row in db.iterrows()]
+            return result
+        else:
+            return []
+        
     def getCategoriesAssignedToAreas(self, areas_ids: set[str]) -> list[Category]: # Martina
         cat_areas = []
         assigned_cat = []
@@ -929,17 +940,17 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
 
         for _, row in merged.iterrows():
             result.append(Journal(
-                row['id'],
-                row['title'],
-                row['issn'],
-                row['eissn'],
-                row['publisher'],
-                row['languages'],
-                row['license'],
-                row['apc'],
-                row['seal']
+                row.get('id'),
+                row.get('title'),
+                row.get('issn'),
+                row.get('eissn'),
+                row.get('publisher'),
+                row.get('languages'),
+                row.get('license'),
+                row.get('apc'),
+                row.get('seal')
             ))
         return result  
+    
     def getDiamondJournalsAreasAndCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
         pass
-
