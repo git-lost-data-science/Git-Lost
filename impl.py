@@ -629,7 +629,7 @@ class BasicQueryEngine:
             print(f"Error loading methods due to the following: {e}")
             return False # appends the category handlers to the categoryQuery
 
-    def getEntityById(entity: str) -> Optional[IdentifiableEntity]: # Rumana
+    def getEntityById(self, entity: str) -> Optional[IdentifiableEntity]: # Rumana
         # ensure consistency of return values! this may need to be transformed into a tuple
         entity_df, idType = entity # entity_df is a dataframe, idType is the type of the object
         if isinstance(idType, Category):
@@ -800,7 +800,7 @@ class BasicQueryEngine:
             db['seal'] = db['seal'].astype(bool) # ensuring it is treated as a boolean type if anything happens
             
             for idx, row in db.iterrows():
-                if db.query('seal == True'): #db['seal'] == True: maybe using the query is more efficient
+                if db.query('seal == True'): #db['seal'] == True: maybe using the query is more efficient  
                     jou_obj = Journal(
                         id = row.get('id'),
                         title = row.get('title'),
@@ -808,7 +808,7 @@ class BasicQueryEngine:
                         # eissn = row.get('eissn'),
                         publisher = row.get('publisher'),
                         languages = row.get('languages').split(','),
-                        license = row.get('issn'),
+                        license = row.get('issn'), #should be changed to license?
                         apc = row.get('apc'),
                         seal = row.get('seal')
                     ) 
