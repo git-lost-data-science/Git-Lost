@@ -288,44 +288,49 @@ class QueryHandler(Handler):
     def __init__(self):
         super().__init__()
 
-    def getById(self, _: str) -> pd.DataFrame: # Ila, it should return a pd.DataFrame. CHECK
-        if self.getCategoriesById(id):
-            return (self.getCategoriesById(id), Category)
-        elif self.getAreasById(id):
-            return (self.getAreasById(id), Area)
-        elif self.getJournalsById(id):
-            return (self.JournalsById(id), Journal)
+    def getById(self) -> pd.DataFrame: # ? Ila & Nico, it should return a pd.DataFrame. CHECK
+        if self.getCategoryById(id): # category
+            return self.getCategoryById(id) # sort out the multiple quartiles problem!
+        elif self.getAreaById(id): # area
+            return self.getAreaById(id)
+        elif self.getJournalById(id): # issn/eissn
+            # what's missing here?
+            # The associated categories and areas are not a part of this dataframe
+
+            return self.getJournalsById(id)
         else:
-            return pd.DataFrame, None 
+            return pd.DataFrame
         # to define later, separately
         # Both specific ID methods should be called here, returning a dataframe with all identifiable entities
+
 class CategoryQueryHandler(QueryHandler):
-    def getCategoriesById(self, id: str) -> pd.DataFrame: # Ila
-        path= self.dbPathOrUrl
+    def getCategoryById(self, id: str) -> pd.DataFrame: # Ila
+        path = self.getDbPathOrUrl()
         try:
             with sqlite3.connect(path) as con:
                 query = """
-                    SELECT * FROM Category
-                        OR LOWER([category]) = LOWER(?) 
-                        OR LOWER([quartile]) = LOWER(?)
+                    SELECT *
+                    FROM Category
+                    WHERE LOWER(category) = LOWER(?);
                 """  
-                params = (f"%{id.lower()}%", id.lower()) # '?' are placeholders, % are wildcards, before and after it may contain other characters 
-                cat_df = pd.read_sql(query, con, params=params).drop_duplicates()
+                params = id.lower() 
+                cat_df = pd.read_sql(query, con, params=(params,)).drop_duplicates()
                 return cat_df 
         except Exception as e:
             print(f"Error in the query: {e}")
             return pd.DataFrame
 
-    def getAreasById(self, id:str) -> pd.DataFrame: #Ila
-        path= self.dbPathOrUrl
+    def getAreaById(self, id: str) -> pd.DataFrame: #Ila
+        path = self.getDbPathOrUrl()
         try:
             with sqlite3.connect(path) as con:
                 query = """
-                    SELECT * FROM Category
-                        OR LOWER([area]) = LOWER(?)
-                """  
-                params = (f"%{id.lower()}%") # '?' are placeholders, % are wildcards, before and after it may contain other characters 
-                cat_df = pd.read_sql(query, con, params=params).drop_duplicates()
+                    SELECT *
+                    FROM Category
+                    WHERE LOWER(area) = LOWER(?); 
+                """ # formally select distinct area
+                params = id.lower() # '?' are placeholders, % are wildcards, before and after it may contain other characters 
+                cat_df = pd.read_sql(query, con, params=(params, )).drop_duplicates()
                 return cat_df 
         except Exception as e:
             print(f"Error in the query: {e}")
@@ -629,22 +634,21 @@ class BasicQueryEngine:
             print(f"Error loading methods due to the following: {e}")
             return False # appends the category handlers to the categoryQuery
 
-    def getEntityById(self, entity: str) -> Optional[IdentifiableEntity]: # Rumana
+    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: #? Nico
         # ensure consistency of return values! this may need to be transformed into a tuple
-        entity_df, idType = entity # entity_df is a dataframe, idType is the type of the object
-        if isinstance(idType, Category):
-            for _, row in entity_df.iterrows(): # what if more than one value exists? Nico is concerned
+        entity_df = self.getById(id)
+
+        for _, row in entity_df.iterrows(): # what if more than one value exists? Nico is concerned
+            if row.get("category"):
                 return Category(row.get("category"), row.get("quartile"))
-            # transform the object into a Category
-        elif isinstance(idType, Area):
-            for _, row in entity_df.iterrows():
+            elif row.get("area"):
                 return Area(row.get("area"))
-        elif isinstance(idType, Journal):
-            for _, row in entity_df.iterrows():
+            elif row.get("journal"):
                 return Journal(row.get("issn"), row.get("title"), row.get("languages"), row.get("publisher"), 
                                row.get("seal"), row.get("licence"), row.get("apc"), None, None)
-        else:
-            return None
+                # ! hasCategory and hasArea remain blank! 
+            else:
+                return None
 
     def getAllJournals(self) -> list[Journal]: # ! Ila, to be tested
         all_data = []
@@ -835,7 +839,7 @@ class BasicQueryEngine:
     def getAllAreas(self) -> list[Area]: # Rumana
         try:
             with sqlite3.connect(self.getDbPathOrUrl()) as con:
-                query = "SELECT DISTINCT area FROM categories;"  # Query to fetch unique areas
+                query = "SELECT DISTINCT area FROM Category;"  # Query to fetch unique areas
                 df = pd.read_sql(query, con)  # Execute the query and store results in a DataFrame
                 
                 areas = []
@@ -952,5 +956,5 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
             ))
         return result  
     
-    def getDiamondJournalsAreasAndCAtegoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
+    def getDiamondJournalsAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
         pass
