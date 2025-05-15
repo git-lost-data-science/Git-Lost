@@ -285,56 +285,79 @@ class CategoryUploadHandler(UploadHandler):
 # ! NOTE: TABLE NAME IS 'Category' NOT 'Categories'
 # QUERY HANDLER 
 class QueryHandler(Handler): 
-    def __init__(self):
+    def __init__(self, id: str):
         super().__init__()
-
-    def getById(self) -> pd.DataFrame: # ? Ila & Nico, it should return a pd.DataFrame. CHECK
-        if self.getCategoryById(id): # category
-            return self.getCategoryById(id) # sort out the multiple quartiles problem!
-        elif self.getAreaById(id): # area
-            return self.getAreaById(id)
-        elif self.getJournalById(id): # issn/eissn
-            # what's missing here?
-            # The associated categories and areas are not a part of this dataframe
-
-            return self.getJournalsById(id)
+    
+    def combineJournalIds(issn: str, eissn: str):
+        if issn and eissn: # if they both exist
+            journal_ids = issn + ', ' + eissn # a space for consistent formatting
+        elif issn:
+            journal_ids = issn
+        elif eissn:
+            journal_ids = eissn
         else:
-            return pd.DataFrame
-        # to define later, separately
-        # Both specific ID methods should be called here, returning a dataframe with all identifiable entities
+            journal_ids = None # address this case!!
+        return journal_ids
+
+    def getById(self, id: str) -> Optional[pd.DataFrame]: # ? Ila & Nico, it should return a pd.DataFrame. CHECK
+        if self.getCategoryObjectById(id, "category"):
+            return self.getCategoryObjectById(id, "category") 
+        elif self.getCategoryObjectById(id, "area"):
+            return self.getCategoryObjectById(id, "area")
+        elif self.getJournalsById(id): 
+            journals_df = self.getJournalsById(id)
+
+            for _, row in journals_df.iterrows(): 
+                journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
+                journals_df = journals_df.insert(0, "journal-ids", pd.Series(journal_ids, dtype="string")) # now, the new column is added !
+            
+            categories_df = self.getCategoryObjectById(journal_ids, "journal-ids")
+
+            if not categories_df:
+                return journals_df
+            
+            categories = list(set(row.get("category") for _, row in categories_df.iterrows())) # sets to prevent duplicates
+            areas = list(set(row.get("area") for _, row in categories_df.iterrows()))
+            quartiles = list(set(row.get("quartile") for _, row in categories_df.iterrows()))
+
+            if 1 < len(quartiles) < 4: # taking only the first (assuming)
+                quartiles = quartiles[0]
+            elif len(quartiles) >= 4: # none means all
+                quartiles = np.nan
+            else: # keeping this as a separate condition for now just in case
+                quartiles = np.nan
+
+            categories_str = ", ".join(categories)
+            areas_str = ", ".join(areas)
+
+            journals_df.drop("issn", axis=1, inplace=True) # Because I always forget, axis=1 indicates columns NOT rows
+            journals_df.drop("eissn", axis=1, inplace=True) # dropping old columns (just because)
+            journals_df = journals_df.insert(0, "category", pd.Series(categories_str, dtype="string"))
+            journals_df = journals_df.insert(0, "area", pd.Series(areas_str, dtype="string"))
+            journals_df = journals_df.insert(0, "quartile", pd.Series(quartiles, dtype="string"))
+
+            return journals_df
+            # this is a complete dataframe containing not 
+        else:
+            return pd.DataFrame()
+  
 
 class CategoryQueryHandler(QueryHandler):
-    def getCategoryById(self, id: str) -> pd.DataFrame: # Ila
+    def getCategoryObjectById(self, id: str, object_type: str) -> pd.DataFrame: # Ila
         path = self.getDbPathOrUrl()
         try:
             with sqlite3.connect(path) as con:
-                query = """
+                query = f"""
                     SELECT *
                     FROM Category
-                    WHERE LOWER(category) = LOWER(?);
-                """  
+                    WHERE LOWER("{object_type}") = LOWER(?);
+                """ # quotation marks must be included to account for queries with variables such as internal-id that have a hyphen
                 params = id.lower() 
                 cat_df = pd.read_sql(query, con, params=(params,)).drop_duplicates()
                 return cat_df 
         except Exception as e:
             print(f"Error in the query: {e}")
             return pd.DataFrame
-
-    def getAreaById(self, id: str) -> pd.DataFrame: #Ila
-        path = self.getDbPathOrUrl()
-        try:
-            with sqlite3.connect(path) as con:
-                query = """
-                    SELECT *
-                    FROM Category
-                    WHERE LOWER(area) = LOWER(?); 
-                """ # formally select distinct area
-                params = id.lower() # '?' are placeholders, % are wildcards, before and after it may contain other characters 
-                cat_df = pd.read_sql(query, con, params=(params, )).drop_duplicates()
-                return cat_df 
-        except Exception as e:
-            print(f"Error in the query: {e}")
-            return pd.DataFrame       
 
     def getAllCategories(self) -> pd.DataFrame: # Rumana
         try:
@@ -363,7 +386,7 @@ class CategoryQueryHandler(QueryHandler):
         categories = [] # an addition: the default argument assumes all quartiles
         query = """
             SELECT quartile, category
-            FROM Categories
+            FROM Category
             WHERE quartile = ?
             ;
         """
@@ -449,7 +472,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         }}
         """
         try:
-            titles_df = sparql_dataframe.get(endpoint, query, True)
+            titles_df = sparql_dataframe.get(endpoint, query, True).drop_duplicates()
             return titles_df
         except Exception as e:
             print(f"Error in the SPARQL query: {e}")
@@ -478,6 +501,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             return pd.DataFrame
         
     def getJournalsWithTitle(self, partialTitle: str): # ! Nico: Test the method! Blazegraph continues to fail...
+        # ! Add Martina's suggestions !
         query = f"""
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
@@ -608,9 +632,9 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             return pd.DataFrame
         
 class BasicQueryEngine:
-    def __init__(self, journalQuery, categoryQuery): # ? Ila, done
-        self.journalQuery= []
-        self.categoryQuery= []
+    def __init__(self): # ? Ila, done
+        self.journalQuery = []
+        self.categoryQuery = []
 
     def cleanJournalHandlers(self) -> bool:
         self.journalQuery= []
@@ -634,23 +658,29 @@ class BasicQueryEngine:
             print(f"Error loading methods due to the following: {e}")
             return False # appends the category handlers to the categoryQuery
 
-    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: #? Nico
-        # ensure consistency of return values! this may need to be transformed into a tuple
+    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # ? Nico, seems okay
         entity_df = self.getById(id)
 
         for _, row in entity_df.iterrows(): # what if more than one value exists? Nico is concerned
-            if row.get("category"):
+            if row.get("journal"): # this MUST go first, because the other two may be true as well (and that is not good)
+                category = Category(row.get("category"), row.get("quartile"))
+                area = Area(row.get("area"))
+                return Journal(id, row.get("title"), row.get("languages"), row.get("publisher"), row.get("seal"), 
+                               row.get("licence"), row.get("apc"), category, area)
+                # here, hasCategory and hasArea are the categories and areas that belong to each journal
+            elif row.get("category"):
                 return Category(row.get("category"), row.get("quartile"))
             elif row.get("area"):
                 return Area(row.get("area"))
-            elif row.get("journal"):
-                return Journal(row.get("issn"), row.get("title"), row.get("languages"), row.get("publisher"), 
-                               row.get("seal"), row.get("licence"), row.get("apc"), None, None)
-                # ! hasCategory and hasArea remain blank! 
             else:
                 return None
 
     def getAllJournals(self) -> list[Journal]: # ! Ila, to be tested
+        # & a problem here!
+        # & combining the strings
+        # & id = issn + ',' + eissn (function!)
+        # & then, this ID can be compared against ids found in categories
+
         all_data = []
 
         for journal in self.journalQuery:  # it looks at all the queries in the list journalQuery
@@ -720,11 +750,11 @@ class BasicQueryEngine:
         if journals:
             journals = pd.concat(journals, ignore_index=True).drop_duplicates().fillna("")  
             for _, row in journals.iterrows(): # none is used twice as a placeholder...
-                journal = Journal(row.get("eissn"), row.get("title"), row.get("languages"), row.get("publisher"), 
-                                  row.get("seal"), row.get("licence"), row.get("apc"), None, None) 
+                journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
+                journal = journal.getEntityById(journal_ids) # * YEAH THAT IS BRILLIANT!!! Much nicer than doing each parameter
                 all_journals.append(journal) # maybe the eissn is the internal id for the journal (I'm not sure?)
                 
-        return all_journals # 'issn', 'title', 'languages', 'publisher', 'seal', 'licence', 'apc'
+        return all_journals 
 
     def getJournalsWithLicense(self, licenses:set[str]) -> list[Journal]: # Rumana
         try:
@@ -821,7 +851,7 @@ class BasicQueryEngine:
         else:
             return []
 
-    def getAllCategories(self) -> list[Category]: # ! Nico, working but does not address the problem of duplicates and multiple quartiles
+    def getAllCategories(self) -> list[Category]: # ? Nico, working but does not address the problem of duplicates and multiple quartiles
         # The getAllCategories method had to be modified to include quartiles...
         category_dfs = [category.getAllCategories() for category in self.categoryQuery] # list comprehension to generate
         all_categories = []
@@ -836,12 +866,12 @@ class BasicQueryEngine:
             # steps: first get categories, merge categories if they are mentioned multiple times with different quartiles...
         return all_categories
     
-    def getAllAreas(self) -> list[Area]: # Rumana
-        try:
+    def getAllAreas(self) -> list[Area]: # ! Rumana, requires fixing
+        try: # ! Incorporate previous methods, not correct...
             with sqlite3.connect(self.getDbPathOrUrl()) as con:
                 query = "SELECT DISTINCT area FROM Category;"  # Query to fetch unique areas
                 df = pd.read_sql(query, con)  # Execute the query and store results in a DataFrame
-                
+
                 areas = []
                 for _, row in df.iterrows():
                     area = Area(id=row['area'])  # Create Area objects for each unique area
