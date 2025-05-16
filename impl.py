@@ -285,7 +285,7 @@ class CategoryUploadHandler(UploadHandler):
 # ! NOTE: TABLE NAME IS 'Category' NOT 'Categories'
 # QUERY HANDLER 
 class QueryHandler(Handler): 
-    def __init__(self, id: str):
+    def __init__(self):
         super().__init__()
     
     def combineJournalIds(issn: str, eissn: str):
@@ -297,53 +297,68 @@ class QueryHandler(Handler):
             journal_ids = eissn
         else:
             journal_ids = None # address this case!!
-        return journal_ids
+            return journal_ids
+
+    def mergeCategories(self, target_df: pd.DataFrame): # ^ Nico's method to avoid redundant repetition of code
+        categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
+        areas = list(set(row.get("area") for _, row in target_df.iterrows()))
+        quartiles = list(set(row.get("quartile") for _, row in target_df.iterrows()))
+
+        if 1 < len(quartiles) < 4: # taking only the first (assuming)
+            quartiles = min(quartiles)
+        elif len(quartiles) >= 4: # none means all
+            quartiles = np.nan
+        else: # keeping this as a separate condition for now just in case
+            quartiles = np.nan
+
+        categories_str = ", ".join(categories)
+        areas_str = ", ".join(areas)
+
+        target_df.drop("category", axis=1, inplace=True)
+        target_df.drop("quartile", axis=1, inplace=True)
+        target_df.drop("area", axis=1, inplace=True)
+
+        target_df.insert(0, "category", pd.Series(categories_str, dtype="string"))
+        target_df.insert(0, "quartile", pd.Series(quartiles, dtype="string"))
+        target_df.insert(0, "area", pd.Series(areas_str, dtype="string"))
+
+        return target_df
 
     def getById(self, id: str) -> Optional[pd.DataFrame]: # ? Ila & Nico, it should return a pd.DataFrame. CHECK
-        if self.getCategoryObjectById(id, "category"):
-            return self.getCategoryObjectById(id, "category") 
-        elif self.getCategoryObjectById(id, "area"):
-            return self.getCategoryObjectById(id, "area")
-        elif self.getJournalsById(id): 
-            journals_df = self.getJournalsById(id)
+        categories_df = self.getCategoryObjectById(id, "category")
+        areas_df = self.getCategoryObjectById(id, "area")
 
-            for _, row in journals_df.iterrows(): 
-                journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
-                journals_df = journals_df.insert(0, "journal-ids", pd.Series(journal_ids, dtype="string")) # now, the new column is added !
-            
-            categories_df = self.getCategoryObjectById(journal_ids, "journal-ids")
-
-            if not categories_df:
-                return journals_df
-            
-            categories = list(set(row.get("category") for _, row in categories_df.iterrows())) # sets to prevent duplicates
-            areas = list(set(row.get("area") for _, row in categories_df.iterrows()))
-            quartiles = list(set(row.get("quartile") for _, row in categories_df.iterrows()))
-
-            if 1 < len(quartiles) < 4: # taking only the first (assuming)
-                quartiles = quartiles[0]
-            elif len(quartiles) >= 4: # none means all
-                quartiles = np.nan
-            else: # keeping this as a separate condition for now just in case
-                quartiles = np.nan
-
-            categories_str = ", ".join(categories)
-            areas_str = ", ".join(areas)
-
-            journals_df.drop("issn", axis=1, inplace=True) # Because I always forget, axis=1 indicates columns NOT rows
-            journals_df.drop("eissn", axis=1, inplace=True) # dropping old columns (just because)
-            journals_df = journals_df.insert(0, "category", pd.Series(categories_str, dtype="string"))
-            journals_df = journals_df.insert(0, "area", pd.Series(areas_str, dtype="string"))
-            journals_df = journals_df.insert(0, "quartile", pd.Series(quartiles, dtype="string"))
-
-            return journals_df
-            # this is a complete dataframe containing not 
+        if not categories_df.empty:
+            categories_df = self.mergeCategories(categories_df)
+            return categories_df.iloc[0]
+        elif not areas_df.empty:
+            areas_df = self.mergeCategories(areas_df)
+            return areas_df.iloc[0]
         else:
-            return pd.DataFrame()
+            journals_df = self.getJournalsById(id) # only for this!
+            if not journals_df.empty: 
+                # journals_df = self.getJournalsById(id) # only for this!
+
+                for _, row in journals_df.iterrows(): 
+                    journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
+                    journals_df.insert(0, "journal-ids", pd.Series(journal_ids, dtype="string")) # now, the new column is added !
+                
+                categories_df = self.getCategoryObjectById(journal_ids, "journal-ids") # only associated categories
+                
+                journals_df.drop("issn", axis=1, inplace=True) # Because I always forget, axis=1 indicates columns NOT rows
+                journals_df.drop("eissn", axis=1, inplace=True) # dropping old columns (just because)
+                categories_df = self.mergeCategories(categories_df) # reassign categories
+
+                journals_df = pd.concat([journals_df, categories_df], axis=1)
+
+                return journals_df # change to journals_df.iloc[0] when successful
+                # this is a complete dataframe containing not 
+            else:
+                return pd.DataFrame()
   
 
 class CategoryQueryHandler(QueryHandler):
-    def getCategoryObjectById(self, id: str, object_type: str) -> pd.DataFrame: # Ila
+    def getCategoryObjectById(self, id: str, object_type: str) -> pd.DataFrame: # ? Nico, working
         path = self.getDbPathOrUrl()
         try:
             with sqlite3.connect(path) as con:
@@ -394,7 +409,6 @@ class CategoryQueryHandler(QueryHandler):
             with sqlite3.connect(path) as con:
                 for quartile in quartiles: # ? Testing one quartile at a time, addresses the blank case
                     quartile_df = pd.read_sql(query, con, params=(quartile,)) 
-                    print(quartile)
         except Exception as e:
             print(f"Error in the query: {e}") 
             return pd.DataFrame  
@@ -609,14 +623,14 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             print(f"Error in SPARQL query due to: {e}") 
             return pd.DataFrame
     
-    def JournalsWithDOAJSeal(self): # ? Nico, done, untested
+    def JournalsWithDOAJSeal(self): # ? Nico, done, untested, check select statement
         try:
             endpoint = self.getDbPathOrUrl()
             query = """
             PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
-            SELECT ?title ?seal
+            SELECT ?internalId ?title ?issn ?eissn ?languages ?publisher ?seal ?license ?apc
             WHERE {
                 ?s rdf:type schema:Periodical .
                 ?s schema:name ?title .
@@ -659,18 +673,23 @@ class BasicQueryEngine:
             return False # appends the category handlers to the categoryQuery
 
     def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # ? Nico, seems okay
+        # TODO (Nico): Use .astype() to ensure that all objects are made into strings once getById() is fixed
+        # actually, this might not work properly...
+        # this is because row.get with all results will return dataframes, not strings...
+        # ! object creation will now be CENTRALISED through this method
+        # there will be no other methods responsible for creating objects
+
         entity_df = self.getById(id)
 
         for _, row in entity_df.iterrows(): # what if more than one value exists? Nico is concerned
-            if row.get("journal"): # this MUST go first, because the other two may be true as well (and that is not good)
+            if "journal" in entity_df.columns: # this MUST go first, because the other two may be true as well (and that is not good)
                 category = Category(row.get("category"), row.get("quartile"))
                 area = Area(row.get("area"))
-                return Journal(id, row.get("title"), row.get("languages"), row.get("publisher"), row.get("seal"), 
-                               row.get("licence"), row.get("apc"), category, area)
-                # here, hasCategory and hasArea are the categories and areas that belong to each journal
-            elif row.get("category"):
+                return Journal(id, row.get("title"), row.get("languages"), row.get("publisher"), row.get("seal"), row.get("licence"), 
+                               row.get("apc"), category | None, area | None)
+            elif "category" in entity_df.columns:
                 return Category(row.get("category"), row.get("quartile"))
-            elif row.get("area"):
+            elif "area" in entity_df.columns:
                 return Area(row.get("area"))
             else:
                 return None
@@ -751,8 +770,13 @@ class BasicQueryEngine:
             journals = pd.concat(journals, ignore_index=True).drop_duplicates().fillna("")  
             for _, row in journals.iterrows(): # none is used twice as a placeholder...
                 journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
-                journal = journal.getEntityById(journal_ids) # * YEAH THAT IS BRILLIANT!!! Much nicer than doing each parameter
+                journal = journal.getEntityById(journal_ids) # * Much nicer than doing each parameter
                 all_journals.append(journal) # maybe the eissn is the internal id for the journal (I'm not sure?)
+
+                # TODO (Nico): Fix the getEntityById method so that a similar process to the above works in other methods
+                # a similar process to the above can be done with areas
+                # an area's id is inserted into the getById function, returning an area
+                # getEntityById can then return a reliable result
                 
         return all_journals 
 
@@ -858,15 +882,16 @@ class BasicQueryEngine:
     
         if category_dfs:
             category_dfs = pd.concat(category_dfs, ignore_index=True).drop_duplicates()  
-            pprint(category_dfs)
             # no need to fill blank values...
             for _, row in category_dfs.iterrows():
-                category = Category(row.get("category"), row.get("quartile"))
+                category = self.getEntityById(row.get("category"))
+                # Category(row.get("category"), row.get("quartile"))
                 all_categories.append(category)
             # steps: first get categories, merge categories if they are mentioned multiple times with different quartiles...
         return all_categories
     
     def getAllAreas(self) -> list[Area]: # ! Rumana, requires fixing
+        # NO SQL querying here!
         try: # ! Incorporate previous methods, not correct...
             with sqlite3.connect(self.getDbPathOrUrl()) as con:
                 query = "SELECT DISTINCT area FROM Category;"  # Query to fetch unique areas
@@ -946,7 +971,7 @@ class BasicQueryEngine:
         return assigned_areas
 
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
-    pass
+    # & using getEntityById and getById will massively simplify all of these methods
     def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]): # Nico
         pass
     def getJournalsInAreasWithLicense(self, areas_ids:set[str]): # Ila 
