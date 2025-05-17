@@ -287,18 +287,7 @@ class CategoryUploadHandler(UploadHandler):
 class QueryHandler(Handler): 
     def __init__(self, id: str):
         super().__init__()
-    
-    def combineJournalIds(issn: str, eissn: str):
-        if issn and eissn: # if they both exist
-            journal_ids = issn + ', ' + eissn # a space for consistent formatting
-        elif issn:
-            journal_ids = issn
-        elif eissn:
-            journal_ids = eissn
-        else:
-            journal_ids = None # address this case!!
-        return journal_ids
-    
+      
     def mergeCategories(self, target_df: pd.DataFrame): # ^ Nico's method to avoid redundant repetition of code
         categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
         areas = list(set(row.get("area") for _, row in target_df.iterrows()))
@@ -325,19 +314,18 @@ class QueryHandler(Handler):
         return target_df
 
     def getById(self, id: str) -> Optional[pd.DataFrame]: # ? Ila & Nico, it should return a pd.DataFrame. CHECK
-        categories_df = self.getCategoryObjectById(id, "category")
-        areas_df = self.getCategoryObjectById(id, "area")
+        categories_df = self.getCategoryObjectById(id, "category") # looking if the id is related to category
+        areas_df = self.getCategoryObjectById(id, "area") # looking if the id is related to area
 
-        if not categories_df.empty:
-            categories_df = self.mergeCategories(categories_df)
+        if not categories_df.empty: # if it is looking for category, then the df will be not empty 
+            categories_df = self.mergeCategories(categories_df) # and merge the results (all the cat names will be in one columns)
             return categories_df.iloc[0]
-        elif not areas_df.empty:
+        elif not areas_df.empty: # same for areas
             areas_df = self.mergeCategories(areas_df)
             return areas_df.iloc[0]
-        else:
-            journals_df = self.getJournalsById(id) # only for this!
-            if not journals_df.empty: 
-                # journals_df = self.getJournalsById(id) # only for this!
+        else: # else, if it is a journal, we need all the info related to the journals, so we call the method
+            journals_df = self.getJournalsById(id) 
+            if not journals_df.empty: # checking if it is not empty, that the journal exists
 
                 for _, row in journals_df.iterrows(): 
                     journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
@@ -625,7 +613,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             print(f"Error in SPARQL query due to: {e}") 
             return pd.DataFrame()
     
-    def JournalsWithDOAJSeal(self): #! Ila: I have modified the query according to Marti
+    def JournalsWithDOAJSeal(self): # Ila
         try:
             endpoint = self.getDbPathOrUrl()
             query = """
@@ -658,7 +646,7 @@ class BasicQueryEngine:
         self.journalQuery = []
         self.categoryQuery = []
 
-    def cleanJournalHandlers(self) -> bool:
+    def cleanJournalHandlers(self) -> bool: # ? Ila, done
         self.journalQuery= []
         return True
     def cleanCategoryHandlers(self) -> bool: #  ? Ila, done
@@ -694,53 +682,32 @@ class BasicQueryEngine:
                 category = Category(row.get("category"), row.get("quartile"))
                 area = Area(row.get("area"))
                 return Journal(id, row.get("title"), row.get("languages"), row.get("publisher"), row.get("seal"), row.get("licence"), 
-                               row.get("apc"), category | None, area | None)
+                               row.get("apc"), category | None, area | None) 
             elif "category" in entity_df.columns:
                 return Category(row.get("category"), row.get("quartile"))
             elif "area" in entity_df.columns:
                 return Area(row.get("area"))
             else:
                 return None
-            
-    """def combineJournalIds(self) -> list[str]: # Ila 
-        all_journals = self.getAllJournals()  # DataFrame
-        journal_ids = []
 
-        for _, row in all_journals.iterrows():
-            issn = row.get("issn", "") or ""
-            eissn = row.get("eissn", "") or ""
-            combined_id = f"{issn},{eissn}"
-            journal_ids.append(combined_id)
 
-        return journal_ids"""
-
-    def getAllJournals(self) -> list[Journal]: # ! Ila, need to modify it 
-        # & a problem here!
-        # & combining the strings
-        # & id = issn + ',' + eissn (function!)
-        # & then, this ID can be compared against ids found in categories
-
+    def getAllJournals(self) -> list[Journal]: # Ila
         all_data = []
 
-        for journal in self.journalQuery:  # it looks at all the queries in the list journalQuery
-            if isinstance(journal, JournalQueryHandler):  # checks if it is an instance of the JournalQueryHandler
-                df = journal.getAllJournals()  # calls the previous method on it
-                all_data.append(df) # appends the result of that method in a list
+        for journal in self.journalQuery:  # it looks at all the queries in the list journalQuery 
+            df = journal.getAllJournals()  # calls the previous method on it
+            all_data.append(df) # appends the result of that method in a list
+
         if all_data:
-            db = pd.concat(all_data, ignore_index=True).drop_duplicates() # we can have more than one df, so let's drop duplicates 
-            db = db[['title', 'issn', 'eissn', 'publisher', 'languages', 'license', 'apc', 'seal']].fillna('') # take these rows from the cleared db 
-            result = [
-                Journal(
-                row.get('title'),
-                row.get('issn'),
-                row.get('eissn'),
-                row.get('publisher'),
-                row.get('languages'),
-                row.get('seal'),
-                row.get('license'),
-                row.get('apc')
-                ) for _, row in db.iterrows()
-            ]
+            db = pd.concat(all_data, ignore_index=True).drop_duplicates().fillna("")
+
+            result = []
+            for _, row in db.iterrows():
+                journal_id = row.get("id")  
+                journal = self.getEntityById(journal_id)
+                if journal:
+                    result.append(journal)
+
             return result
         else:
             return []
@@ -838,22 +805,25 @@ class BasicQueryEngine:
             print(f"Error while getting journals by license: {e}")
             return []
 
-    def getJournalsWithAPC(self) -> list[Journal]: # ? Ila, check it 
+    def getJournalsWithAPC(self) -> list[Journal]: # Ila
         all_data = []
         result = []
+
         for journal in self.journalQuery:  # it looks at all the queries in the list journalQuery
                 df = journal.getJournalsWithAPC()  # calls the previous method on it
                 all_data.append(df) # appends the result of that method in a list
 
         if all_data:
-            all_data = pd.concat(all_data, ignore_index=True).drop_duplicates().fillna("") # we can have more than one df, so let's drop duplicates 
+            all_data = pd.concat(all_data, ignore_index=True).drop_duplicates().fillna("")
+
             for _, row in all_data.iterrows():
-                journal_ids= self.combineJournalIds()
-                for id in journal_ids:
-                    journal= journal.getEntityById(journal_ids)
+                journal_id = row.get("id")  
+                journal = self.getEntityById(journal_id)
+                if journal:
                     result.append(journal)
+
             return result
-        else: 
+        else:
             return []
        
     def getJournalsWithDOAJSeal(self) -> list[Journal]: # Martina
@@ -916,13 +886,18 @@ class BasicQueryEngine:
     def getCategoriesWithQuartile(self, quartiles:set[str]) -> list[Category]: # Ila
         all_data = []
         for category in self.categoryQuery:  # it looks at all the queries in the list journalQuery
-            if isinstance(category, CategoryQueryHandler):  # checks if it is an instance of the JournalQueryHandler
                 df = category.getCategoriesWithQuartile()  # calls the previous method on it
                 all_data.append(df) # appends the result of that method in a list
+        
         if all_data:
-            db = pd.concat(all_data, ignore_index=True).drop_duplicates() # we can have more than one df, so let's drop duplicates 
-            db = db[['quartile', 'category']].fillna('') # take these rows from the cleared db 
-            result = [Category(row.get('quartile'),row.get('category')) for _, row in db.iterrows()]
+            db = pd.concat(all_data, ignore_index=True).drop_duplicates().fillna("")
+
+            result = []
+            for _, row in db.iterrows():
+                category_id = row.get("category")  
+                category = self.getEntityById(category_id)
+                if category.quartile in quartiles:
+                    result.append(category)
             return result
         else:
             return []
@@ -991,10 +966,9 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
         journals_with_license= self.getJournalsWithLicense(licenses) # else, we need to return all the Journal objects that have a license and from those journals, take all the journals in the specified area
         
         result = []
-        for journal in journals_with_license: 
-            if journal.hasArea:
-                if journal.area in areas_ids:
-                    result.append(journal)
+        for journal in journals_with_license:
+            if journal.area and journal.area.id in areas_ids: # The Area obj should have the id (name) since it inherits it from the IdentifiableEntity
+                result.append(journal)
         return result
 
     def getDiamondJournalsAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
