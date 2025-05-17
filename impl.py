@@ -285,16 +285,28 @@ class CategoryUploadHandler(UploadHandler):
 # ! NOTE: TABLE NAME IS 'Category' NOT 'Categories'
 # QUERY HANDLER 
 class QueryHandler(Handler): 
-    def __init__(self, id: str):
+    def __init__(self):
         super().__init__()
-      
+    
+    @staticmethod
+    def combineJournalIds(issn: str, eissn: str):
+        if issn and eissn: # if they both exist
+            journal_ids = issn + ', ' + eissn # a space for consistent formatting
+        elif issn:
+            journal_ids = issn
+        elif eissn:
+            journal_ids = eissn
+        else:
+            journal_ids = None # address this case!!
+            return journal_ids
+
     def mergeCategories(self, target_df: pd.DataFrame): # ^ Nico's method to avoid redundant repetition of code
         categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
         areas = list(set(row.get("area") for _, row in target_df.iterrows()))
         quartiles = list(set(row.get("quartile") for _, row in target_df.iterrows()))
 
-        if 1 < len(quartiles) < 4: # taking only the first (assuming)
-            quartiles = min(quartiles)
+        if 1 < len(quartiles) < 4: # a string with multiple
+            quartiles = ", ".join(quartiles)
         elif len(quartiles) >= 4: # none means all
             quartiles = np.nan
         else: # keeping this as a separate condition for now just in case
@@ -313,34 +325,39 @@ class QueryHandler(Handler):
 
         return target_df
 
-    def getById(self, id: str) -> Optional[pd.DataFrame]: # ? Ila & Nico, it should return a pd.DataFrame. CHECK
-        categories_df = self.getCategoryObjectById(id, "category") # looking if the id is related to category
-        areas_df = self.getCategoryObjectById(id, "area") # looking if the id is related to area
+    def getById(self, id: str) -> Optional[pd.DataFrame]: # ? Nico, almost there...
+        # \d{4} – starting with 4 digits
+        # \d{3,4} – 3/4 digits because there might be an X at the end
+        # X?: optional (as stated)
+        #(, \d{4}-\d{3,4}X?)* – the second pair is optional
+        
+        journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
 
-        if not categories_df.empty: # if it is looking for category, then the df will be not empty 
-            categories_df = self.mergeCategories(categories_df) # and merge the results (all the cat names will be in one columns)
-            return categories_df.iloc[0]
-        elif not areas_df.empty: # same for areas
-            areas_df = self.mergeCategories(areas_df)
-            return areas_df.iloc[0]
-        else: # else, if it is a journal, we need all the info related to the journals, so we call the method
-            journals_df = self.getJournalsById(id) 
-            if not journals_df.empty: # checking if it is not empty, that the journal exists
+        if not bool(journal_id_pattern.match(id)): 
+            categories_df = self.getCategoryObjectById(id, "category")
+            areas_df = self.getCategoryObjectById(id, "area")
+            if not categories_df.empty:
+                categories_df = self.mergeCategories(categories_df)
+                return categories_df.iloc[0]
+            elif not areas_df.empty:
+                areas_df = self.mergeCategories(areas_df)
+                return areas_df.iloc[0]
+        else:
+            possible_journal_ids = id.split(",").strip()
+            for possible_journal_id in possible_journal_ids:
+                journals_df = self.getJournalsById(possible_journal_id) # only for this!
+                if not journals_df.empty:
+                    id = possible_journal_id
 
+            if not journals_df.empty: 
                 for _, row in journals_df.iterrows(): 
-                    journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
+                    journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn")) # ! delete when blazegraph is modified
                     journals_df.insert(0, "journal-ids", pd.Series(journal_ids, dtype="string")) # now, the new column is added !
-                
-                categories_df = self.getCategoryObjectById(journal_ids, "journal-ids") # only associated categories
                 
                 journals_df.drop("issn", axis=1, inplace=True) # Because I always forget, axis=1 indicates columns NOT rows
                 journals_df.drop("eissn", axis=1, inplace=True) # dropping old columns (just because)
-                categories_df = self.mergeCategories(categories_df) # reassign categories
 
-                journals_df = pd.concat([journals_df, categories_df], axis=1)
-
-                return journals_df # change to journals_df.iloc[0] when successful
-                # this is a complete dataframe containing not 
+                return journals_df.iloc[0]
             else:
                 return pd.DataFrame()
   
@@ -646,7 +663,7 @@ class BasicQueryEngine:
         self.journalQuery = []
         self.categoryQuery = []
 
-    def cleanJournalHandlers(self) -> bool: # ? Ila, done
+    def cleanJournalHandlers(self) -> bool:
         self.journalQuery= []
         return True
     def cleanCategoryHandlers(self) -> bool: #  ? Ila, done
@@ -669,29 +686,35 @@ class BasicQueryEngine:
             return False # appends the category handlers to the categoryQuery
 
     def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # ? Nico, seems okay
-        # TODO (Nico): Use .astype() to ensure that all objects are made into strings once getById() is fixed
-        # actually, this might not work properly...
-        # this is because row.get with all results will return dataframes, not strings...
-        # ! object creation will now be CENTRALISED through this method
-        # there will be no other methods responsible for creating objects
+        journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
 
-        entity_df = self.getById(id)
+        if bool(journal_id_pattern.match(id)): # yes, it is a journal
+            journals = list(set(journal.getById(id) for journal in self.journalQuery)) 
+            categories = list(set(category.getById(id) for category in self.categoryQuery))
 
-        for _, row in entity_df.iterrows(): # what if more than one value exists? Nico is concerned
-            if "journal" in entity_df.columns: # this MUST go first, because the other two may be true as well (and that is not good)
+            journal_categories = []
+            journal_areas = []
+
+            for _, row in categories.iterrows():
                 category = Category(row.get("category"), row.get("quartile"))
                 area = Area(row.get("area"))
-                return Journal(id, row.get("title"), row.get("languages"), row.get("publisher"), row.get("seal"), row.get("licence"), 
-                               row.get("apc"), category | None, area | None) 
-            elif "category" in entity_df.columns:
-                return Category(row.get("category"), row.get("quartile"))
-            elif "area" in entity_df.columns:
+                journal_categories.append(category)
+                journal_areas.append(area)
+
+            for _, row in journals.iterrows():
+                return Journal(id, row.get("title"), row.get("languages"), row.get("publisher"), row.get("seal"), 
+                               row.get("licence"), row.get("apc"), Optional[category], Optional[area])
+        else:
+            categories = list(set(category.getById(id) for category in self.categoryQuery))
+            if "category" in categories.columns:
+                for _, row in categories.iterrows():
+                    return Category(row.get("category"), row.get("quartile"))
+            elif "area" in categories.columns:
                 return Area(row.get("area"))
             else:
                 return None
 
-
-    def getAllJournals(self) -> list[Journal]: # Ila
+        def getAllJournals(self) -> list[Journal]: # Ila
         all_data = []
 
         for journal in self.journalQuery:  # it looks at all the queries in the list journalQuery 
@@ -747,8 +770,7 @@ class BasicQueryEngine:
             return result
         else:
             return []
-
-
+        
     def getJournalsPublishedBy(self, partialName: str) -> list[Journal]: # ! Nico, requires revisions in line with modifications
         journals = [journal.getJournalsPublishedBy(partialName) for journal in self.journalQuery]
         all_journals = []
@@ -759,11 +781,6 @@ class BasicQueryEngine:
                 journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
                 journal = journal.getEntityById(journal_ids) # * Much nicer than doing each parameter
                 all_journals.append(journal) # maybe the eissn is the internal id for the journal (I'm not sure?)
-
-                # TODO (Nico): Fix the getEntityById method so that a similar process to the above works in other methods
-                # a similar process to the above can be done with areas
-                # an area's id is inserted into the getById function, returning an area
-                # getEntityById can then return a reliable result
                 
         return all_journals 
 
@@ -804,7 +821,7 @@ class BasicQueryEngine:
         except Exception as e:
             print(f"Error while getting journals by license: {e}")
             return []
-
+            
     def getJournalsWithAPC(self) -> list[Journal]: # Ila
         all_data = []
         result = []
@@ -825,7 +842,7 @@ class BasicQueryEngine:
             return result
         else:
             return []
-       
+            
     def getJournalsWithDOAJSeal(self) -> list[Journal]: # Martina
         jou_seal = []
         res_obj = []
@@ -858,7 +875,7 @@ class BasicQueryEngine:
         else:
             return []
 
-    def getAllCategories(self) -> list[Category]: # Nico 
+    def getAllCategories(self) -> list[Category]: # ? Nico, working but does not address the problem of duplicates and multiple quartiles
         # The getAllCategories method had to be modified to include quartiles...
         category_dfs = [category.getAllCategories() for category in self.categoryQuery] # list comprehension to generate
         all_categories = []
@@ -873,15 +890,22 @@ class BasicQueryEngine:
             # steps: first get categories, merge categories if they are mentioned multiple times with different quartiles...
         return all_categories
     
-    def getAllAreas(self) -> list[Area]: # Rumana
-        area_dfs = [category.getAllAreas() for category in self.categoryQuery if isinstance(category, CategoryQueryHandler)]
-        all_areas = []
-        if area_dfs:
-            db = pd.concat(area_dfs, ignore_index=True).drop_duplicates().fillna('')
-            for _, row in db.iterrows():
-                area = Area(id=row['area'])
-                all_areas.append(area)
-        return all_areas
+    def getAllAreas(self) -> list[Area]: # ! Rumana, requires fixing
+        # NO SQL querying here!
+        try: # ! Incorporate previous methods, not correct...
+            with sqlite3.connect(self.getDbPathOrUrl()) as con:
+                query = "SELECT DISTINCT area FROM Category;"  # Query to fetch unique areas
+                df = pd.read_sql(query, con)  # Execute the query and store results in a DataFrame
+
+                areas = []
+                for _, row in df.iterrows():
+                    area = Area(id=row['area'])  # Create Area objects for each unique area
+                    areas.append(area)
+                
+                return areas
+        except Exception as e:
+            print(f"Error fetching areas: {e}")
+            return []
             
     def getCategoriesWithQuartile(self, quartiles:set[str]) -> list[Category]: # Ila
         all_data = []
@@ -952,9 +976,26 @@ class BasicQueryEngine:
         return assigned_areas
 
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
-    pass # & using getEntityById and getById will massively simplify all of these methods
-    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]): # Nico
-        pass
+    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]=None) -> list[Journal]: # Nico
+        target_categories = []
+        journals_in_categories = []
+
+        if category_ids:
+            for category_id in category_ids:
+                category = self.getEntityById(category_id)
+                target_categories.append(category) # only a list with VERY specific categories
+        else:
+            target_categories = self.getAllCategories() # if unspecified, all categories are assumed
+        
+        journals = self.getAllJournals()
+
+        for journal in journals:
+            journal_categories = journal.getCategories() # this is why we have getter methods!!!
+            for journal_category in journal_categories:
+                if journal_category in target_categories: # possible thanks to the __eq__ definition
+                    journals_in_categories.append(journal_category)
+
+        return journals_in_categories
 
     def getJournalsInAreasWithLicense(self, areas_ids:set[str], licenses: set[str]) -> list[Journal]: # Ila 
         if not areas_ids and not licenses: # if there are no areas nor licenses specified, then all the journal objects are returned 
@@ -963,13 +1004,13 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
         if not areas_ids: # if there are no areas specified, then all the journal with the specified licenses are returned
             return self.getJournalsWithLicense(licenses)
         
-        journals_with_license= self.getJournalsWithLicense(licenses) # else, we need to return all the Journal objects that have a license and from those journals, take all the journals in the specified area
+        journals_with_license = self.getJournalsWithLicense(licenses) # else, we need to return all the Journal objects that have a license and from those journals, take all the journals in the specified area
         
         result = []
         for journal in journals_with_license:
             if journal.area and journal.area.id in areas_ids: # The Area obj should have the id (name) since it inherits it from the IdentifiableEntity
                 result.append(journal)
         return result
-
-    def getDiamondJournalsAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
+    
+    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
         pass
