@@ -430,13 +430,13 @@ class CategoryQueryHandler(QueryHandler):
                         FROM Category
                         WHERE {" OR ".join(["LOWER(area) LIKE ?" for _ in area_ids_lower])}
                     """
-                    df = pd.read_sql(query, con, params=[f"%{a}%" for a in area_ids_lower]).drop_duplicates() # prof doesn't want duplicates
+                    df = pd.read_sql(query, con, params=[f"%{a}%" for a in area_ids_lower])
                 else:
                     query = """
                         SELECT DISTINCT area, category
                         FROM Category
                     """
-                    df = pd.read_sql(query, con).drop_duplicates() # prof doesn't want duplicates 
+                    df = pd.read_sql(query, con)
                 return df
         except Exception as e:
             print(f"Error in the query: {e}")
@@ -472,6 +472,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
     def getJournalsById(self, id: str) -> pd.DataFrame: # ^ N supplementary method
         endpoint = self.getDbPathOrUrl()
         query = f"""
+        PREFIX res:    <https://github.com/git-lost-data-science/res/>
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
@@ -521,10 +522,11 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         
     def getJournalsWithTitle(self, partialTitle: str): # ?? Nico, requires testing
         query = f"""
+        PREFIX res:    <https://github.com/git-lost-data-science/res/>
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
-        SELECT ?id ?title ?issn ?eissn ?languages ?publisher ?seal ?license ?apc
+        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
         WHERE {{ 
             ?s rdf:type schema:Periodical .
             ?s schema:identifier ?id .
@@ -591,7 +593,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
     
             fil_lic = " || ".join(filter_clauses)
     
-            query = f'''
+            query = f"""
             PREFIX res: <https://github.com/git-lost-data-science/res/>
             PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
@@ -605,9 +607,9 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
                 ?s schema:inLanguage ?languages .
                 ?s schema:hasDOAJSeal ?seal .
                 ?s schema:hasAPC ?apc .
-                FILTER ({fil_lic})
+                FILTER ("{fil_lic}")
             }}
-            '''
+            """
     
             jou_df = sparql_dataframe.get(endpoint, query, True)
             return jou_df.fillna('')
@@ -620,6 +622,10 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         try:
             endpoint = self.getDbPathOrUrl()
             jouAPC_query = '''
+            PREFIX res: <https://github.com/git-lost-data-science/res/>
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            PREFIX schema: <https://schema.org/>
+
             SELECT ?title ?id ?publisher ?languages ?seal ?license ?apc
             WHERE {
                 ?s rdf:type schema:Periodical .
@@ -645,6 +651,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         try:
             endpoint = self.getDbPathOrUrl()
             query = """
+            PREFIX res: <https://github.com/git-lost-data-science/res/>
             PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
@@ -991,47 +998,39 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
             return self.getJournalsWithLicense(licenses)
         
         journals_with_license = self.getJournalsWithLicense(licenses) # else, we need to return all the Journal objects that have a license and from those journals, take all the journals in the specified area
-        
         result = []
+
         for journal in journals_with_license:
-            if journal.area and journal.area.id in areas_ids: # The Area obj should have the id (name) since it inherits it from the IdentifiableEntity
-                result.append(journal)
+            journal_areas= journal.hasArea()
+            for area in journal_areas:
+                if area in areas_ids:
+                    result.append(journal)
         return result
     
-    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]): # Martina
-        # ... I feel like this is total bs...
+    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # Martina
+        all_journals = self.getAllJournals()
         result = []
-        journals_passed = set()
-        all_journals = self.basicQuery.getAllJournals()
 
-        journals_apc = self.basicQuery.getJournalsWithAPC()
-        categories_list = self.basicQuery.getAllCategories()
-        area_list = self.basicQuery.getAllAreas()
-        cat_q_list = self.basicQuery.getCategoriesWithQuartile(quartiles) # this directly retrieves the categories with the quartiles passed here in input 
-        cat_to_areas = self.basicQuery.getCategoriesAssignedToAreas()
-        areas_to_cat = self.basicQuery.getAreasAssignedToCategories()
+        areas = self.getAllAreas() if not areas_ids else areas_ids
+        categories = self.getAllCategories() if not category_ids else category_ids
+        all_quartiles = None if not quartiles else quartiles 
 
-        diamond_journals = [journal for journal in all_journals if journal not in journals_apc]
-                
-        # .instersection() ?
-        if not areas_ids and not category_ids and not quartiles: # let's put it as "base case" I would say
-            areas_ids = area_list
-            category_ids = categories_list
-            quartiles = set(['Q1', 'Q2', 'Q3', 'Q4'] or 'unknown') 
-       
-        target_area = set(areas_ids).intersection(area_list)
-        target_categories = set(category_ids).intersection(categories_list)
-        target_quartiles = set(target_categories).intersection(cat_q_list)
-                   
-        for jou in diamond_journals:
-            jou_id = jou.get('id') 
-            jou_categories = set(jou.get('categories', []))
-            jou_areas = set(jou.get('areas', []))
-            if jou_id not in journals_passed:
-                journals_passed.add(jou)
-                if jou_categories.intersection(areas_to_cat) and jou_areas.intersection(target_area):
-                    result.append(jou)
-        return result
+        # need only the Journals without APC
+        for jou in all_journals:
+            if not jou.hasAPC:
+                journal_areas= jou.hasArea # list of all the areas of the Journal
+                for area in journal_areas:
+                    if area in areas and area not in result:
+                        result.append(jou)
+                journal_categories = jou.hasCategory # list of all the Categories of the journal
+                for category in journal_categories:
+                    if category in categories and category not in result:
+                        result.append(jou)
+                    journal_quartiles = category.getQuartile()
+                    for quartile in journal_quartiles:
+                        if quartile in all_quartiles and quartile not in result: 
+                            result.append(jou)
+            return result
 
 
 
