@@ -54,19 +54,19 @@ class Journal(IdentifiableEntity):
         # ?? hasCategory: Optional[list[Category]], hasArea: Optional[list[Area]]): are included in the list
         super().__init__(id)
 
-        if not isinstance(title, str) or not title:
+        if not isinstance(title, str) and not title:
             raise TypeMismatchError("a non-empty str", title) # ? the same as raise TypeError(f"Expected a non-empty str, got {type(title).__name__}")
         
-        if not isinstance(languages, list) or not all(isinstance(lang, str) for lang in languages) or not languages:
+        if not isinstance(languages, list) and not all(isinstance(lang, str) for lang in languages) or not languages:
             raise TypeMismatchError("a non-empty str or list", languages)
         
-        if not (isinstance(publisher, str) or isinstance(publisher, None)):
+        if not (isinstance(publisher, str) and isinstance(publisher, None)):
             raise TypeMismatchError("a str or a NoneType", publisher)
         
         if not isinstance(seal, bool):
             raise TypeMismatchError("a boolean", seal)
         
-        if not isinstance(licence, str) or not licence:
+        if not isinstance(licence, str) and not licence:
             raise TypeMismatchError("a non-empty str", licence)
         
         if not isinstance(apc, bool):
