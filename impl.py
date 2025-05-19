@@ -50,7 +50,7 @@ class Area(IdentifiableEntity):
 
 class Journal(IdentifiableEntity):
     def __init__(self, id, title: str, languages: str | list, publisher: Optional[str], 
-                 seal: bool, licence: str, apc: bool):
+                 seal: bool, license: str, apc: bool):
         # ?? hasCategory: Optional[list[Category]], hasArea: Optional[list[Area]]): are included in the list
         super().__init__(id)
 
@@ -66,8 +66,8 @@ class Journal(IdentifiableEntity):
         if not isinstance(seal, bool):
             raise TypeMismatchError("a boolean", seal)
         
-        if not isinstance(licence, str) and not licence:
-            raise TypeMismatchError("a non-empty str", licence)
+        if not isinstance(license, str) and not license:
+            raise TypeMismatchError("a non-empty str", license)
         
         if not isinstance(apc, bool):
             raise TypeMismatchError("a boolean", apc)
@@ -76,7 +76,7 @@ class Journal(IdentifiableEntity):
         self.languages = languages
         self.publisher = publisher
         self.seal = seal
-        self.licence = licence
+        self.license = license
         self.apc = apc
         self.hasCategory = []   # ! List of Category objects, CHECK !
         self.hasArea =  [] # ! List of Area objects, CHECK 
@@ -85,12 +85,12 @@ class Journal(IdentifiableEntity):
     def addCategory(self, category): # ! BRING IT BACK!
         if not isinstance(category, Category):
             raise ValueError("category must be an instance of Category.")
-        self.categories.append(category)
+        self.hasCategory.append(category)
 
     def addArea(self, area): # same here
         if not isinstance(area, Area):
             raise ValueError("area must be an instance of Area.")
-        self.areas.append(area)
+        self.hasArea.append(area)
 
     def getTitle(self):
         return self.title
@@ -104,8 +104,8 @@ class Journal(IdentifiableEntity):
     def hasDOAJSeal(self):
         return self.seal
 
-    def getLicence(self):
-        return self.licence
+    def getLicense(self):
+        return self.license
 
     def hasAPC(self):
         return self.apc
@@ -224,7 +224,7 @@ class JournalUploadHandler(UploadHandler):
             
         journals_int_id = {}
         for idx, row in journals.iterrows():
-            language = str(row.get('languages')).split(', ') # ! Please change this, it is not working -- Will it work now? We hope
+            # language = str(row.get('languages')).split(', ') # ! Please change this, it is not working -- Will it work now? We hope
             loc_id = "journal-" + str(idx)
     
             subj = rdflib.URIRef(base_url + loc_id)
@@ -246,8 +246,7 @@ class JournalUploadHandler(UploadHandler):
             j_graph.add((subj, rdflib.RDF.type, Journal))
             j_graph.add((subj, id, rdflib.Literal(combined_id)))
             j_graph.add((subj, title, rdflib.Literal(row["title"])))
-            if language not in (subj, languages, rdflib.Literal(language)):
-                j_graph.add((subj, languages, rdflib.Literal((language))))
+            j_graph.add((subj, languages, rdflib.Literal(row["languages"])))
             j_graph.add((subj, publisher, rdflib.Literal(row["publisher"])))
             j_graph.add((subj, seal, rdflib.Literal(row["seal"])))    
             j_graph.add((subj, license, rdflib.Literal(row["license"])))
@@ -329,7 +328,7 @@ class QueryHandler(Handler):
             possible_journal_ids = id.split(", ")
             possible_journal_ids.append(id) # adding this possibility too (i.e. all ids are together)
             for possible_journal_id in possible_journal_ids:
-                journals_df = self.getJournalsById(possible_journal_id.strip()) # only for this!
+                journals_df = self.getJournalById(possible_journal_id.strip()) # only for this!
                 if not journals_df.empty:
                     id = possible_journal_id # checking for 
 
@@ -352,7 +351,7 @@ class CategoryQueryHandler(QueryHandler):
         try:
             with sqlite3.connect(path) as con:
                 query = f"""
-                    SELECT *
+                    SELECT DISTINCT *
                     FROM Category
                     WHERE LOWER("{object_type}") = LOWER(?);
                 """ 
@@ -389,7 +388,7 @@ class CategoryQueryHandler(QueryHandler):
         path = self.getDbPathOrUrl() # a safer way to access the path than directly accessing the variable
         categories = [] # an addition: the default argument assumes all quartiles
         query = """
-            SELECT quartile, category
+            SELECT DISTINCT quartile, category
             FROM Category
             WHERE quartile = ?
             ;
@@ -457,7 +456,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         # SELECT specifies the columns that you want
         # WHERE specifies the conditions that a value must adhere to in order to be placed in the column
 
-    def getJournalsById(self, id: str) -> pd.DataFrame: # ^ N supplementary method
+    def getJournalById(self, id: str) -> pd.DataFrame: # ^ N supplementary method
         endpoint = self.getDbPathOrUrl()
         query = f"""
         PREFIX res: <https://github.com/git-lost-data-science/res/>
@@ -489,17 +488,23 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
     def getAllJournals(self): # Martina
         try:
             endpoint = self.getDbPathOrUrl()
-            journal_query = '''
-            PREFIX res:    <https://github.com/git-lost-data-science/res/>
-            PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            journal_query = f"""
+            PREFIX res: <https://github.com/git-lost-data-science/res/>
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
-            SELECT *
-            WHERE {
+            SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+            WHERE {{ 
                 ?s rdf:type schema:Periodical .
-                ?s ?p ?o .
-            }
-            ''' # Though I think raising a SELECT with * might be potentially perilous 
+                ?s schema:identifier ?o . 
+                ?s schema:name ?title . 
+                ?s schema:inLanguage ?languages .
+                ?s schema:publisher ?publisher .
+                ?s schema:hasDOAJSeal ?seal .
+                ?s schema:license ?license .
+                ?s schema:hasAPC ?apc .
+            }} 
+            """
             
             journal_df = sparql_dataframe.get(endpoint, journal_query, True)
             return journal_df
@@ -510,7 +515,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         
     def getJournalsWithTitle(self, partialTitle: str): # ?? Nico, requires testing
         query = f"""
-        PREFIX res:    <https://github.com/git-lost-data-science/res/>
+        PREFIX res: <https://github.com/git-lost-data-science/res/>
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
@@ -525,8 +530,8 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             ?s schema:license ?license .
             ?s schema:hasAPC ?apc .
 
-            FILTER CONTAINS(LCASE(STR(?title)), LCASE("{partialTitle}")) # ? matching the title and the partial title
-        }}
+            FILTER CONTAINS(LCASE(STR(?title)), LCASE("{partialTitle}"))
+        }} 
         """
 
         try:
@@ -543,18 +548,18 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
-        SELECT ?title ?id ?publisher ?languages ?seal ?license ?apc
-        WHERE {{
+        SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+        WHERE {{ 
             ?s rdf:type schema:Periodical .
-            ?s schema:publisher ?o .
-            ?s schema:name ?title .
-            ?s schema:identifier ?id . 
-            ?s schema:publisher ?publisher .
+            ?s schema:identifier ?o . 
+            ?s schema:name ?title . 
             ?s schema:inLanguage ?languages .
+            ?s schema:publisher ?publisher .
             ?s schema:hasDOAJSeal ?seal .
             ?s schema:license ?license .
             ?s schema:hasAPC ?apc .
-            FILTER CONTAINS(LCASE(STR(?o)), LCASE("{partialName}"))
+
+            FILTER CONTAINS(LCASE(STR(?title)), LCASE("{partialName}"))
         }}
         """
         try:
@@ -567,80 +572,10 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
     def getJournalsWithLicense(self, licenses: set[str]): # Rumana
         endpoint = self.getDbPathOrUrl()
         try:
-            normalized_licenses = {lic.lower() for lic in licenses}
-    
-            # Partial match clause for license values
-            filter_clauses = [
-                f'CONTAINS(LCASE(STR(?license)), "{lic}")'
-                for lic in normalized_licenses
-            ]
-    
-            # match publisher-specific licenses
-            if "publisher" in normalized_licenses:
-                filter_clauses.append('CONTAINS(LCASE(STR(?license)), "publisher")')
-    
-            fil_lic = " || ".join(filter_clauses)
-    
-            query = f"""
-            PREFIX res: <https://github.com/git-lost-data-science/res/>
-            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-            PREFIX schema: <https://schema.org/>
-            SELECT ?title ?license ?publisher ?id ?languages ?seal ?apc
-            WHERE {{
-                ?s rdf:type schema:Periodical .
-                ?s schema:name ?title .
-                ?s schema:license ?license .
-                ?s schema:publisher ?publisher .
-                ?s schema:identifier ?id .
-                ?s schema:inLanguage ?languages .
-                ?s schema:hasDOAJSeal ?seal .
-                ?s schema:hasAPC ?apc .
-                FILTER ("{fil_lic}")
-            }}
-            """
-    
-            jou_df = sparql_dataframe.get(endpoint, query, True)
-            return jou_df.fillna('')
-    
-        except Exception as e:
-            print(f"Connection to SPARQL endpoint failed due to error: {e}")
-            return pd.DataFrame()   
-                
-    def getJournalsWithAPC(self): # Martina
-        try:
-            endpoint = self.getDbPathOrUrl()
-            jouAPC_query = '''
-            PREFIX res: <https://github.com/git-lost-data-science/res/>
-            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-            PREFIX schema: <https://schema.org/>
-
-            SELECT ?title ?id ?publisher ?languages ?seal ?license ?apc
-            WHERE {
-                ?s rdf:type schema:Periodical .
-                ?s schema:name ?title .
-                ?s schema:identifier ? id . 
-                ?s schema:publisher ?publisher .
-                ?s schema:inLanguage ?languages .
-                ?s schema:hasDOAJSeal ?seal .
-                ?s schema:license ?license .
-                ?s schema:hasAPC ?apc .
-                FILTER (?apc = true)
-            }
-            ''' 
-            
-            jouAPC_df = sparql_dataframe.get(endpoint, jouAPC_query, True)
-            return jouAPC_df
-        
-        except Exception as e:
-            print(f"Error in SPARQL query due to: {e}") 
-            return pd.DataFrame()
-    
-    def JournalsWithDOAJSeal(self): # ?? Nico, requires testing
-        try:
-            endpoint = self.getDbPathOrUrl()
-            query = """
-            PREFIX res: <https://github.com/git-lost-data-science/res/>
-            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            license_list = '", "'.join(licenses)
+            query = f'''
+            PREFIX res:    <https://github.com/git-lost-data-science/res/>
+            PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
             SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
@@ -650,6 +585,68 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
                 ?s schema:name ?title . 
                 ?s schema:inLanguage ?languages .
                 ?s schema:publisher ?publisher .
+                ?s schema:hasDOAJSeal ?seal .
+                ?s schema:license ?license .
+                ?s schema:hasAPC ?apc .
+
+                FILTER (?license IN ("{license_list}"))
+            }}
+            '''
+            jou_df = sparql_dataframe.get(endpoint, query, True)
+            return jou_df.fillna('')  
+
+        except Exception as e:      
+            print(f"Connection to SPARQL endpoint failed due to error: {e}") 
+            return pd.DataFrame()
+
+            
+    def getJournalsWithAPC(self): # Martina
+        try:
+            endpoint = self.getDbPathOrUrl()
+            jouAPC_query = """
+            PREFIX res:    <https://github.com/git-lost-data-science/res/>
+            PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            PREFIX schema: <https://schema.org/>
+
+            SELECT ?title ?id ?publisher ?languages ?seal ?license ?apc
+            WHERE {
+                ?s rdf:type schema:Periodical .
+                ?s schema:name ?title .
+                ?s schema:identifier ?id .
+                ?s schema:publisher ?publisher .
+                ?s schema:inLanguage ?languages .
+                ?s schema:hasDOAJSeal ?seal .
+                ?s schema:license ?license .
+                ?s schema:hasAPC ?apc .
+                
+                FILTER (?apc = true)
+            }
+            """
+            # After a million times of loading the data the query works correctly filtering ONLY the Journals with APC (apc = true)
+            # if this was actually what was required...
+            
+            jouAPC_df = sparql_dataframe.get(endpoint, jouAPC_query, True)
+            return jouAPC_df
+        
+        except Exception as e:
+            print(f"Error in SPARQL query due to: {e}") 
+            return pd.DataFrame()
+    
+    def getJournalsWithDOAJSeal(self): # ?? Nico, requires testing
+        try:
+            endpoint = self.getDbPathOrUrl()
+            query = """
+            PREFIX res:    <https://github.com/git-lost-data-science/res/>
+            PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            PREFIX schema: <https://schema.org/>
+
+            SELECT ?title ?id ?publisher ?languages ?seal ?license ?apc
+            WHERE {
+                ?s rdf:type schema:Periodical .
+                ?s schema:name ?title .
+                ?s schema:identifier ?id .
+                ?s schema:publisher ?publisher .
+                ?s schema:inLanguage ?languages .
                 ?s schema:hasDOAJSeal ?seal .
                 ?s schema:license ?license .
                 ?s schema:hasAPC ?apc .
@@ -665,7 +662,6 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             print(f"The query was unsuccessful due to the following error: {e}") 
             return pd.DataFrame
 
-        
 class BasicQueryEngine:
     def __init__(self): 
         self.journalQuery = []
