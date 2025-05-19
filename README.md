@@ -3,7 +3,7 @@ Hello! This is a project for our Data Science Exam.
 We hope that you enjoy it more than we did. 
 > We did enjoy it a lot, yes. Trust me. 
 
-- ☺ @Rumana-mh
-- ☻ @nicothenacho64
-- ♥ @martinamrc
-- ♪ @theair-hub
+- ☺ github.com/Rumana-mh
+- ☻ github.com/nicothenacho64
+- ♥ github.com/martinamrc
+- ♪ github.com/theair-hub
