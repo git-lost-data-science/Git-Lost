@@ -141,7 +141,7 @@ class UploadHandler(Handler):
     def __init__(self):
         super().__init__()
 
-    def pushDataToDb(self, path: str) -> bool:
+    def pushDataToDb(self, path: str) -> bool: # Nico & Martina
         absolute_path = os.path.abspath(path) # Ila: os uses always an absolute path
         if not os.path.exists(absolute_path):
             return False
@@ -178,7 +178,7 @@ class UploadHandler(Handler):
 
 
 class JournalUploadHandler(UploadHandler):
-    def _csv_file_to_graph(self, csv_file: str):
+    def _csv_file_to_graph(self, csv_file: str): # Martina
         j_graph = rdflib.Graph() # initialising an empty graph
             
         # referencing all the classes:    
@@ -231,8 +231,7 @@ class JournalUploadHandler(UploadHandler):
     
             journals_int_id[row["title"]] = subj
 
-            # a change by Nico: putting this code in here to reduce redundant for loops
-            issn = str(row.get("issn", "")).strip()
+            issn = str(row.get("issn", "")).strip() # Putting this code in here to reduce redundant for loops
             eissn = str(row.get("eissn", "")).strip()
 
             if issn and eissn:
@@ -306,7 +305,7 @@ class QueryHandler(Handler):
             journal_ids = None # address this case!!
             return journal_ids
 
-    def createCategoryObject(self, target_df: pd.DataFrame, object_type: str) -> pd.Series: # ^ Nico's method to avoid redundant repetition of code
+    def createCategoryObject(self, target_df: pd.DataFrame, object_type: str) -> pd.Series: # ^ N method to avoid redundant repetition of code
         categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
         areas = list(set(row.get("area") for _, row in target_df.iterrows()))
         quartiles = list(set(row.get("quartile") for _, row in target_df.iterrows()))
@@ -326,11 +325,6 @@ class QueryHandler(Handler):
         return category_object
 
     def getById(self, id: str) -> pd.Series: # ?? Nico, almost there...
-        # \d{4} – starting with 4 digits
-        # \d{3,4} – 3/4 digits because there might be an X at the end
-        # X?: optional (as stated)
-        #(, \d{4}-\d{3,4}X?)* – the second pair is optional
-        
         journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
 
         if not bool(journal_id_pattern.match(id)): 
@@ -364,7 +358,7 @@ class CategoryQueryHandler(QueryHandler):
     def __init__(self):
         super().__init__()
 
-    def getCategoryObjectsById(self, id: str, object_type: str) -> pd.DataFrame: # ?? Nico's secondary function
+    def getCategoryObjectsById(self, id: str, object_type: str) -> pd.DataFrame: # ^ N secondary function
         path = self.getDbPathOrUrl()
         try:
             with sqlite3.connect(path) as con:
@@ -431,14 +425,14 @@ class CategoryQueryHandler(QueryHandler):
                 if area_ids:
                     area_ids_lower = [a.lower() for a in area_ids]
                     query = f"""
-                        SELECT area, category
+                        SELECT DISTINCT area, category
                         FROM Category
                         WHERE {" OR ".join(["LOWER(area) LIKE ?" for _ in area_ids_lower])}
                     """
                     df = pd.read_sql(query, con, params=[f"%{a}%" for a in area_ids_lower]).drop_duplicates() # prof doesn't want duplicates
                 else:
                     query = """
-                        SELECT area, category
+                        SELECT DISTINCT area, category
                         FROM Category
                     """
                     df = pd.read_sql(query, con).drop_duplicates() # prof doesn't want duplicates 
@@ -447,7 +441,7 @@ class CategoryQueryHandler(QueryHandler):
             print(f"Error in the query: {e}")
             return pd.DataFrame()
     
-    def getAreasAssignedToCategories(self, category_ids: set[str]) -> pd.DataFrame: # ? Nico is doing this one now...
+    def getAreasAssignedToCategories(self, category_ids: set[str]) -> pd.DataFrame: # ?? Nico, requires testing
         path = self.getDbPathOrUrl()
         query = """
             SELECT DISTINCT area, category
@@ -470,8 +464,11 @@ class CategoryQueryHandler(QueryHandler):
 class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
     def __init__(self):
         super().__init__()
+        # How does a query work here?
+        # SELECT specifies the columns that you want
+        # WHERE specifies the conditions that a value must adhere to in order to be placed in the column
 
-    def getJournalsById(self, id: str) -> pd.DataFrame: # ?? Nico has done this one
+    def getJournalsById(self, id: str) -> pd.DataFrame: # ^ N supplementary method
         endpoint = self.getDbPathOrUrl()
         query = f"""
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -633,7 +630,7 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             print(f"Error in SPARQL query due to: {e}") 
             return pd.DataFrame()
     
-    def JournalsWithDOAJSeal(self): # ?? Nico, done, untested, added DOAJ seal filter
+    def JournalsWithDOAJSeal(self): # ?? Nico, requires testing
         try:
             endpoint = self.getDbPathOrUrl()
             query = """
@@ -664,14 +661,13 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
 
         
 class BasicQueryEngine:
-    def __init__(self): # ? Ila, done
+    def __init__(self): 
         self.journalQuery = []
         self.categoryQuery = []
 
-    def cleanJournalHandlers(self) -> bool:
+    def cleanJournalHandlers(self) -> bool: # ? Ila, done
         self.journalQuery = []
         return True
-        
     def cleanCategoryHandlers(self) -> bool: #  ? Ila, done
         self.categoryQuery = []
         return True  
@@ -684,7 +680,7 @@ class BasicQueryEngine:
             print(f"Error loading methods due to: {e}")
             return False # appends the journal handler to the journal handlers
             
-    def addCategoryHandler(self, handler: CategoryQueryHandler) -> bool: # ? Nico, done
+    def addCategoryHandler(self, handler: CategoryQueryHandler) -> bool: # * Nico, done
         try:
             self.categoryQuery.append(handler)
             return True
@@ -692,7 +688,7 @@ class BasicQueryEngine:
             print(f"Error loading methods due to the following: {e}")
             return False # appends the category handlers to the categoryQuery
 
-    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # ?? Nico, seems okay
+    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # ?? Nico, requires testing with journal objects
         journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
 
         if journal_id_pattern.match(id) is not None: # when it is a journal
@@ -709,7 +705,7 @@ class BasicQueryEngine:
                     area_values = list(set(row.get("area") for _, row in journal_ids_df.iterrows()))
 
                     journal = Journal(
-                        journal_object["id"], 
+                        journal_object["journal-ids"], 
                         journal_object["title"], 
                         journal_object["languages"], 
                         journal_object["publisher"], 
@@ -905,8 +901,8 @@ class BasicQueryEngine:
             category_df = categoryQueryHandler.getAllCategories()
             if not category_df.empty:
                 for value in category_df["category"]:
-                    category = self.getEntityById(value) 
-                    all_categories.append(category) 
+                    category = self.getEntityById(value)
+                    all_categories.append(category)
 
         return all_categories
     
@@ -996,12 +992,12 @@ class BasicQueryEngine:
         return assigned_areas
 
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
-    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]=None) -> list[Journal]: # ?? Nico, attempted
+    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]=None) -> list[Journal]: # ?? Nico, requires testing once getEntityById works
         target_categories = []
         journals_in_categories = []
 
-        if category_ids:
-            for category_id in category_ids:
+        if category_ids: # no duplicates are possible given that category_ids is a set
+            for category_id in category_ids: 
                 category = self.getEntityById(category_id)
                 target_categories.append(category) # only a list with VERY specific categories
         else:
