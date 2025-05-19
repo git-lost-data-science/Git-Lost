@@ -57,10 +57,10 @@ class Journal(IdentifiableEntity):
         if not isinstance(title, str) and not title:
             raise TypeMismatchError("a non-empty str", title) # ? the same as raise TypeError(f"Expected a non-empty str, got {type(title).__name__}")
         
-        if not isinstance(languages, list) and not all(isinstance(lang, str) for lang in languages) or not languages:
+        if not isinstance(languages, list) and not all(isinstance(lang, str) for lang in languages) and not isinstance(languages, str) and not languages:
             raise TypeMismatchError("a non-empty str or list", languages)
         
-        if not (isinstance(publisher, str) and isinstance(publisher, None)):
+        if not isinstance(publisher, str) and not publisher:
             raise TypeMismatchError("a str or a NoneType", publisher)
         
         if not isinstance(seal, bool):
@@ -293,18 +293,6 @@ class CategoryUploadHandler(UploadHandler):
 class QueryHandler(Handler): 
     def __init__(self):
         super().__init__()
-    
-    @staticmethod
-    def combineJournalIds(issn: str, eissn: str):
-        if issn and eissn: # if they both exist
-            journal_ids = issn + ', ' + eissn # a space for consistent formatting
-        elif issn:
-            journal_ids = issn
-        elif eissn:
-            journal_ids = eissn
-        else:
-            journal_ids = None # address this case!!
-            return journal_ids
 
     def createCategoryObject(self, target_df: pd.DataFrame, object_type: str) -> pd.Series: # ^ N method to avoid redundant repetition of code
         categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
@@ -472,27 +460,27 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
     def getJournalsById(self, id: str) -> pd.DataFrame: # ^ N supplementary method
         endpoint = self.getDbPathOrUrl()
         query = f"""
-        PREFIX res:    <https://github.com/git-lost-data-science/res/>
+        PREFIX res: <https://github.com/git-lost-data-science/res/>
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
         SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
         WHERE {{ 
             ?s rdf:type schema:Periodical .
-            ?s schema:identifier ?o . # I can't work out the name of this column, but o works fine
-            ?s schema:name ?title . # The schema is name instead of title here
+            ?s schema:identifier ?o . 
+            ?s schema:name ?title . 
             ?s schema:inLanguage ?languages .
             ?s schema:publisher ?publisher .
-            ?s schema:hasDOAJSeal ?seal . # The schema here needs to be hasDOAJSeal not doajSeal or any other formatting
+            ?s schema:hasDOAJSeal ?seal .
             ?s schema:license ?license .
             ?s schema:hasAPC ?apc .
         
-        FILTER CONTAINS(LCASE(STR(?o)), LCASE({id}))
+            FILTER CONTAINS(LCASE(STR(?o)), LCASE("{id}"))
         }} 
         """
 
         try:
-            titles_df = sparql_dataframe.get(endpoint, query, True).drop_duplicates()
+            titles_df = sparql_dataframe.get(endpoint, query, True)
             return titles_df
         except Exception as e:
             print(f"Error in the SPARQL query: {e}")
@@ -526,16 +514,16 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
-        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
+        SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
         WHERE {{ 
             ?s rdf:type schema:Periodical .
-            ?s schema:identifier ?id .
-            ?s schema:title ?title .
+            ?s schema:identifier ?o . 
+            ?s schema:name ?title . 
             ?s schema:inLanguage ?languages .
             ?s schema:publisher ?publisher .
+            ?s schema:hasDOAJSeal ?seal .
             ?s schema:license ?license .
             ?s schema:hasAPC ?apc .
-            ?s schema:doajSeal ?seal .
 
             FILTER CONTAINS(LCASE(STR(?title)), LCASE("{partialTitle}")) # ? matching the title and the partial title
         }}
@@ -655,13 +643,13 @@ class JournalQueryHandler(QueryHandler): # all methods return a DataFrame
             PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
-            SELECT ?title ?id ?publisher ?languages ?seal ?license ?apc
-            WHERE {
+            SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+            WHERE {{ 
                 ?s rdf:type schema:Periodical .
-                ?s schema:name ?title .
-                ?s schema:identifier ?id .
-                ?s schema:publisher ?publisher .
+                ?s schema:identifier ?o . 
+                ?s schema:name ?title . 
                 ?s schema:inLanguage ?languages .
+                ?s schema:publisher ?publisher .
                 ?s schema:hasDOAJSeal ?seal .
                 ?s schema:license ?license .
                 ?s schema:hasAPC ?apc .
@@ -686,6 +674,7 @@ class BasicQueryEngine:
     def cleanJournalHandlers(self) -> bool: # ? Ila, done
         self.journalQuery = []
         return True
+                 
     def cleanCategoryHandlers(self) -> bool: #  ? Ila, done
         self.categoryQuery = []
         return True  
@@ -706,8 +695,9 @@ class BasicQueryEngine:
             print(f"Error loading methods due to the following: {e}")
             return False # appends the category handlers to the categoryQuery
 
-    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # ?? Nico, requires testing with journal objects
+    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # ?? Nico, should work...
         journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
+        journal_object = pd.Series()
 
         if journal_id_pattern.match(id) is not None: # when it is a journal
             for journalQueryHandler in self.journalQuery:
@@ -728,7 +718,7 @@ class BasicQueryEngine:
                         journal_object["languages"], 
                         journal_object["publisher"], 
                         journal_object["seal"], 
-                        journal_object["licence"], 
+                        journal_object["license"], 
                         journal_object["apc"]
                     )
                     # create the journal
@@ -740,6 +730,8 @@ class BasicQueryEngine:
                     for area_value in area_values:
                         area = self.getEntityById(area_value)
                         journal.addArea(area)
+            
+            return journal
 
         else:
             for categoryQueryHandler in self.categoryQuery:
@@ -793,18 +785,17 @@ class BasicQueryEngine:
         else:
             return []
         
-    def getJournalsPublishedBy(self, partialName: str) -> list[Journal]: # ! Nico, requires revisions in line with modifications
-        journals = [journal.getJournalsPublishedBy(partialName) for journal in self.journalQuery]
-        all_journals = []
+    def getJournalsPublishedBy(self, partialName: str) -> list[Journal]: # ?? Nico, requires testing
+        published_journals = []
 
-        if journals:
-            journals = pd.concat(journals, ignore_index=True).drop_duplicates().fillna("")  
-            for _, row in journals.iterrows(): # none is used twice as a placeholder...
-                journal_ids = self.combineJournalIds(row.get("issn"), row.get("eissn"))
-                journal = journal.getEntityById(journal_ids) # * Much nicer than doing each parameter
-                all_journals.append(journal) # maybe the eissn is the internal id for the journal (I'm not sure?)
-                
-        return all_journals 
+        for journalQueryHandler in self.journalQuery:
+            journal_df = journalQueryHandler.getJournalsPublishedBy(partialName)
+            if not journal_df.empty:
+                for value in journal_df["journal-ids"]:
+                    journal = self.getEntityById(value)
+                    published_journals.append(journal)
+
+        return published_journals
 
     def getJournalsWithLicense(self, licenses:set[str]) -> list[Journal]: # Rumana
         try:
@@ -949,21 +940,19 @@ class BasicQueryEngine:
             return []
             
     def getAreasAssignedToCategories(self, category_ids: set[str]) -> list[Area]: # * Nico, done and working 
-        assigned_areas = [] # methods like these should be responsible for all the filtering done
+        assigned_areas = []
 
-        categories = [category.getAreasAssignedToCategories(category_ids) for category in self.categoryQuery]
+        for categoryQueryHandler in self.categoryQuery:
+            category_df = categoryQueryHandler.getAreasAssignedToCategories()
+            if not category_df.empty:
+                category_match = {str(category_id).lower() for category_id in category_ids}
+                categories_match = categories["category"].astype(str).str.lower().isin(category_match)
+                categories = categories[categories_match]
 
-        if categories:
-            categories = pd.concat(categories, ignore_index=True).drop_duplicates().fillna("")
- 
-            category_match = {str(category_id).lower() for category_id in category_ids}
-            categories_match = categories["category"].astype(str).str.lower().isin(category_match)
-            categories = categories[categories_match]
-
-            for _, row in categories.iterrows():
-                area = Area(row.get("area")) # ! Add getEntityById !!
-                if area not in assigned_areas: # working thanks to the definition of equality in the IdentifiableEntity class
-                    assigned_areas.append(area)
+                for area_name in category_df["area"]:
+                    area = self.getEntityById(area_name)
+                    if area not in assigned_areas: # working thanks to the definition of equality in the IdentifiableEntity class
+                        assigned_areas.append(area)
 
         return assigned_areas
 
