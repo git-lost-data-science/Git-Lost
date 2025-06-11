@@ -140,7 +140,7 @@ class UploadHandler(Handler):
         if not os.path.exists(absolute_path):
             return False
 
-        if path.endswith(".csv") and isinstance(self, JournalUploadHandler): 
+        if path.endswith(".csv") and isinstance(self, JournalUploadHandler): # as per Gemini's suggestion, each upload handler can now handle files independently of one another
             return self.pushDataToDb(path)
         elif path.endswith(".json") and isinstance(self, CategoryUploadHandler):
             return self.pushDataToDb(path)
@@ -297,38 +297,39 @@ class QueryHandler(Handler):
     def __init__(self):
         super().__init__()
 
-    def getById(self, id: str) -> pd.DataFrame: # Ila: let's try like this, maybe it is more controlled...
+    def getById(self, id: str) -> pd.DataFrame: # ?? Nico
         if isinstance(self, CategoryQueryHandler):
-            return CategoryQueryHandler.getById(self, id)
+            return self.getById(id)
         elif isinstance(self, JournalQueryHandler):
-            return JournalQueryHandler.getById(self, id)
-        else:
+            return self.getById(id)
+        else: 
             return pd.DataFrame()
 
 class CategoryQueryHandler(QueryHandler):
     def __init__(self):
         super().__init__()
-
+    
     def getById(self, id: str) -> pd.DataFrame: # Ila : this is a shorter and faster version than the previous one
         journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
 
         if not journal_id_pattern.match(id): 
-            for field in ["category", "area"]:
-                df = self.getCategoryObjectsById(id, field)
-                if not df.empty:
-                    return self.createCategoryObject(df, field) 
+            entity_types = ["journal-ids", "category", "area"]
+            for entity_type in entity_types:
+                object_df = self.getCategoryObjectsById(id, entity_type)
+                if not object_df.empty:
+                    return self.createCategoryObject(object_df) 
             
         else: # for matching journal ids to their categories and quartiles
             possible_journal_ids = [id] + id.split(", ") # Ila: fixed the syntax
             for journal_id in possible_journal_ids:
                 journal_ids_df = self.getCategoryObjectsById(journal_id, "journal-ids")
                 if not journal_ids_df.empty:
-                    return self.createCategoryObject(journal_ids_df, "journal-ids")
-        
+                    return self.createCategoryObject(journal_ids_df)
+    
         return pd.DataFrame()
     
-    def createCategoryObject(self, target_df: pd.DataFrame, entity_type: str) -> pd.Series: # ^ N method to avoid redundant repetition of code, homogenises data
-        if entity_type == "journal-ids":
+    def createCategoryObject(self, target_df: pd.DataFrame) -> pd.Series: # ^ N method to avoid redundant repetition of code, homogenises data
+        if "journal-ids" in target_df.columns:
             categories_with_quartiles = {}
             areas = set()
             for _, row in target_df.iterrows():
@@ -339,12 +340,12 @@ class CategoryQueryHandler(QueryHandler):
             journal_category_data = pd.DataFrame([journal_category_values], columns=["journal-ids", "categories-with-quartiles", "areas"])
             return journal_category_data
 
-        elif entity_type == "area":
+        elif "area" in target_df.columns:
             areas = list(set(row.get("area") for _, row in target_df.iterrows()))
             target_area = pd.DataFrame([areas[0]], columns=["area"])
             return target_area
 
-        elif entity_type == "category":
+        elif "category" in target_df.columns:
             categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
             unique_quartiles = list(set(row.get("quartile") for _, row in target_df.iterrows() if row.get("quartile") is not None))
 
@@ -357,7 +358,7 @@ class CategoryQueryHandler(QueryHandler):
             else: 
                 quartiles = None
             
-            target_category = pd.DataFrame([categories, quartiles], columns=["category", "quartile"])
+            target_category = pd.DataFrame([[categories[0], quartiles]], columns=["category", "quartile"])
             return target_category
 
         else:
@@ -1047,7 +1048,7 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
                     result.append(journal)
         return result
     
-    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # Marti & Ila
+    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # Ila, Marti & Nico
         diamond_journals = []
         all_journals = self.getAllJournals()
 
@@ -1055,15 +1056,14 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
         target_categories = self.getAllCategories() if not category_ids else [self.getEntityById(category) for category in category_ids]
         target_quartiles = None if not quartiles else quartiles
 
-        for journal in filter(lambda j: not j.hasAPC(), all_journals):
+        for journal in filter(lambda journal: not journal.hasAPC(), all_journals):
             if any(area in target_areas for area in journal.getAreas()): # Ila: added any, if one of the areas is True 
                 diamond_journals.append(journal)
                 continue  # area match is enough
 
-            for category in journal.getCategories():
-                if category in target_categories:
-                    if target_quartiles is None or category.getQuartile() in target_quartiles:
-                        diamond_journals.append(journal)
-                        break  # category+quartile match is enough
+            for category in filter(lambda category: category in target_categories, journal.getCategories()): # Nico – only for the categories that are specified in the input are those that can be checked for quartile eligibility
+                if target_quartiles is None or category.getQuartile() in target_quartiles:
+                    diamond_journals.append(journal)
+                    break  # category + quartile match is enough
 
         return diamond_journals
