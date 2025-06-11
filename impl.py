@@ -361,7 +361,7 @@ class CategoryQueryHandler(QueryHandler):
             else: 
                 quartiles = None
             
-            target_category = pd.DataFrame([categories, quartiles], columns=["category", "quartile"])
+            target_category = pd.DataFrame([[categories[0], quartiles]], columns=["category", "quartile"])
             return target_category
 
         else:
