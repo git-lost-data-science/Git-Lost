@@ -25,10 +25,10 @@ class IdentifiableEntity:
     def __eq__(self, other: Self) -> bool: # checking for value equality
         return self.id == other.id 
     
-    def getIds(self) -> list[str]:
-        if isinstance(self.id, str):
-            return [self.id] # a one element list (containing a string)
-        return list(self.id) # returning the list as per usual
+    def getIds(self):
+        if isinstance(self.id, str):  # M: changed this so it handles the fact that id can also be a string 
+            return [self.id]
+        return self.id
     
 class Category(IdentifiableEntity):
     def __init__(self, id, quartile: Optional[str]): 
@@ -49,6 +49,8 @@ class Journal(IdentifiableEntity):
                  seal: bool, license: str, apc: bool):
         # ?? hasCategory: Optional[list[Category]], hasArea: Optional[list[Area]]): are included in the list
         super().__init__(id)
+        
+        # if not (isinstance(title, str) or title):
 
         if not isinstance(title, str) and not title:
             raise TypeMismatchError("a non-empty str", title) # ? the same as raise TypeError(f"Expected a non-empty str, got {type(title).__name__}")
@@ -91,7 +93,9 @@ class Journal(IdentifiableEntity):
         return self.title
 
     def getLanguages(self):
-        return [self.languages]
+        if isinstance(self.languages, str):
+            return [self.languages]
+        return self.languages
 
     def getPublisher(self):
         return self.publisher
@@ -117,16 +121,13 @@ class Handler:
 
     def getDbPathOrUrl(self): # @property 
         return self.dbPathOrUrl 
-     
+    
     def setDbPathOrUrl(self, pathOrUrl: str) -> bool:  # setter
-        self.dbPathOrUrl = pathOrUrl # should reset the path every time unconditionally
+        self.dbPathOrUrl = pathOrUrl            # CHANGES: to be changed?
             
-        if not pathOrUrl.strip(): 
+        if not pathOrUrl or not pathOrUrl.strip(): 
             return False
-        if pathOrUrl.endswith(".db"): # if it is a local path: it is valid
-            self.dbPathOrUrl = pathOrUrl
-            return True
-        elif "blazegraph" in pathOrUrl: # if it is a blazegraph url: valid
+        if pathOrUrl.endswith(".db") or "blazegraph" in pathOrUrl: # if it is a blazegraph url: valid
             self.dbPathOrUrl = pathOrUrl # ! change this to a regular expression !
             return True
         return False 
@@ -135,20 +136,21 @@ class UploadHandler(Handler):
     def __init__(self):
         super().__init__()
 
-    def pushDataToDb(self, path: str) -> bool: 
-        absolute_path = os.path.abspath(path) # Ila: os uses always an absolute path
-        if not os.path.exists(absolute_path):
-            return False
+    def pushDataToDb(self, _: str) -> bool: 
+        ...
+        # absolute_path = os.path.abspath(path) # Ila: os uses always an absolute path
+        # if not os.path.exists(absolute_path):
+        #     return False
 
-        if path.endswith(".csv") and isinstance(self, JournalUploadHandler): # as per Gemini's suggestion, each upload handler can now handle files independently of one another
-            return self.pushDataToDb(path)
-        elif path.endswith(".json") and isinstance(self, CategoryUploadHandler):
-            return self.pushDataToDb(path)
-        else:
-            return False
+        # if path.endswith(".csv") and isinstance(self, JournalUploadHandler): # as per Gemini's suggestion, each upload handler can now handle files independently of one another
+        #     return self.pushDataToDb(path)
+        # elif path.endswith(".json") and isinstance(self, CategoryUploadHandler):
+        #     return self.pushDataToDb(path)
+        # else:
+        #     return False
 
 class JournalUploadHandler(UploadHandler):
-    def _csv_file_to_graph(self, csv_file: str) -> rdflib.Graph: # Martina
+    def createJournalGraph(self, csv_file: str) -> rdflib.Graph: # Martina
         j_graph = rdflib.Graph() # initialising an empty graph
             
         # referencing all the classes:    
@@ -213,17 +215,17 @@ class JournalUploadHandler(UploadHandler):
             else:
                 combined_ids = ""
 
-            current_languages_str = str(row.get("languages", "")).strip() 
-            if current_languages_str: 
-                list_of_languages = [lang.strip() for lang in current_languages_str.split(",")]
-                for lang_item in list_of_languages:
-                    if lang_item: 
-                        j_graph.add((subj, languages, rdflib.Literal(lang_item)))
+            # current_languages_str = str(row.get("languages", "")).strip() 
+            # if current_languages_str: 
+            #     list_of_languages = [lang.strip() for lang in current_languages_str.split(",")]
+            #     for lang_item in list_of_languages:
+            #         if lang_item: 
+            #             j_graph.add((subj, languages, rdflib.Literal(lang_item)))
         
             j_graph.add((subj, rdflib.RDF.type, Journal))
             j_graph.add((subj, id, rdflib.Literal(combined_ids)))
             j_graph.add((subj, title, rdflib.Literal(row["title"])))
-            # j_graph.add((subj, languages, rdflib.Literal(row["languages"])))
+            j_graph.add((subj, languages, rdflib.Literal(row["languages"])))
             j_graph.add((subj, publisher, rdflib.Literal(row["publisher"])))
             j_graph.add((subj, seal, rdflib.Literal(row["seal"])))    
             j_graph.add((subj, license, rdflib.Literal(row["license"])))
@@ -231,7 +233,7 @@ class JournalUploadHandler(UploadHandler):
         return j_graph
     
     def pushDataToDb(self, path: str) -> bool: 
-        jou_graph = self._csv_file_to_graph(path)
+        jou_graph = self.createJournalGraph(path)
         try:
             store = SPARQLUpdateStore()
             store.open((self.dbPathOrUrl, self.dbPathOrUrl))
@@ -244,7 +246,7 @@ class JournalUploadHandler(UploadHandler):
             return False
 
 class CategoryUploadHandler(UploadHandler): 
-    def _json_file_to_df(self, json_file: str) -> pd.DataFrame: # Ila
+    def createCategoryDataframe(self, json_file: str) -> pd.DataFrame: # Ila
         with open(json_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
             json_df = pd.DataFrame(data) 
@@ -278,7 +280,7 @@ class CategoryUploadHandler(UploadHandler):
             return categories_df 
     
     def pushDataToDb(self, path: str) -> bool: 
-        categories_df = self._json_file_to_df(path)
+        categories_df = self.createCategoryDataframe(path)
         try:
             with sqlite3.connect(self.dbPathOrUrl) as con:
                 categories_df.to_sql("Category", con, if_exists="replace", index=False)
@@ -297,13 +299,8 @@ class QueryHandler(Handler):
     def __init__(self):
         super().__init__()
 
-    def getById(self, id: str) -> pd.DataFrame: # ?? Nico
-        if isinstance(self, CategoryQueryHandler):
-            return self.getById(id)
-        elif isinstance(self, JournalQueryHandler):
-            return self.getById(id)
-        else: 
-            return pd.DataFrame()
+    def getById(self, _: str) -> pd.DataFrame: # ?? Nico
+        ...
 
 class CategoryQueryHandler(QueryHandler):
     def __init__(self):
@@ -313,23 +310,23 @@ class CategoryQueryHandler(QueryHandler):
         journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
 
         if not journal_id_pattern.match(id): 
-            entity_types = ["journal-ids", "category", "area"]
+            entity_types = ["category", "area", "journal-ids"] # journal-ids last...
             for entity_type in entity_types:
                 object_df = self.getCategoryObjectsById(id, entity_type)
                 if not object_df.empty:
-                    return self.createCategoryObject(object_df) 
+                    return self.createCategoryObject(object_df, entity_type) 
             
         else: # for matching journal ids to their categories and quartiles
             possible_journal_ids = [id] + id.split(", ") # Ila: fixed the syntax
             for journal_id in possible_journal_ids:
                 journal_ids_df = self.getCategoryObjectsById(journal_id, "journal-ids")
                 if not journal_ids_df.empty:
-                    return self.createCategoryObject(journal_ids_df)
+                    return self.createCategoryObject(journal_ids_df, "journal")
     
         return pd.DataFrame()
     
-    def createCategoryObject(self, target_df: pd.DataFrame) -> pd.Series: # ^ N method to avoid redundant repetition of code, homogenises data
-        if "journal-ids" in target_df.columns:
+    def createCategoryObject(self, target_df: pd.DataFrame, entity_type: str) -> pd.Series: # ^ N method to avoid redundant repetition of code, homogenises data
+        if entity_type == "journal":
             categories_with_quartiles = {}
             areas = set()
             for _, row in target_df.iterrows():
@@ -340,12 +337,12 @@ class CategoryQueryHandler(QueryHandler):
             journal_category_data = pd.DataFrame([journal_category_values], columns=["journal-ids", "categories-with-quartiles", "areas"])
             return journal_category_data
 
-        elif "area" in target_df.columns:
+        elif entity_type == "area":
             areas = list(set(row.get("area") for _, row in target_df.iterrows()))
             target_area = pd.DataFrame([areas[0]], columns=["area"])
             return target_area
 
-        elif "category" in target_df.columns:
+        elif entity_type == "category":
             categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
             unique_quartiles = list(set(row.get("quartile") for _, row in target_df.iterrows() if row.get("quartile") is not None))
 
@@ -384,7 +381,7 @@ class CategoryQueryHandler(QueryHandler):
     def getAllCategories(self) -> pd.DataFrame: # Rumana
         try:
             with sqlite3.connect(self.getDbPathOrUrl()) as con:
-                query = "SELECT DISTINCT * FROM Category;"
+                query = "SELECT DISTINCT category FROM Category;"
                 df = pd.read_sql(query, con)
                 return df
         except Exception as e:
@@ -444,7 +441,7 @@ class CategoryQueryHandler(QueryHandler):
                         FROM Category
                         WHERE {" OR ".join(["LOWER(area) LIKE ?" for _ in area_ids_lower])}
                     """
-                    df = pd.read_sql(query, con, params=[f"%{a}%" for a in area_ids_lower])
+                    df = pd.read_sql(query, con, params=[f"{a}" for a in area_ids_lower])
                 else:
                     query = """
                         SELECT DISTINCT area, category
@@ -465,7 +462,7 @@ class CategoryQueryHandler(QueryHandler):
         try:
             with sqlite3.connect(path) as con:
                 if category_ids:
-                    category_ids = [f"%{category_id.lower()}%" for category_id in category_ids]
+                    category_ids = [f"{category_id.lower()}" for category_id in category_ids]
                     query += f"""WHERE {" OR ".join(["LOWER(category) LIKE ?" for _ in category_ids])}"""
                     areas_df = pd.read_sql(query, con, params=category_ids)
                 else:
@@ -502,10 +499,10 @@ class JournalQueryHandler(QueryHandler):
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
-        SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
         WHERE {{ 
             ?s rdf:type schema:Periodical .
-            ?s schema:identifier ?o . 
+            ?s schema:identifier ?id . 
             ?s schema:name ?title . 
             ?s schema:inLanguage ?languages .
             ?s schema:publisher ?publisher .
@@ -513,12 +510,12 @@ class JournalQueryHandler(QueryHandler):
             ?s schema:license ?license .
             ?s schema:hasAPC ?apc .
         
-            FILTER CONTAINS(LCASE(STR(?o)), LCASE("{id}"))
+            FILTER CONTAINS(LCASE(STR(?id)), LCASE("{id}"))
         }} 
         """
 
         try:
-            titles_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"o": "journal-ids"})
+            titles_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
             return titles_df
         except Exception as e:
             print(f"Error in the SPARQL query: {e}")
@@ -531,10 +528,10 @@ class JournalQueryHandler(QueryHandler):
             PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
-            SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+            SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
             WHERE {{ 
                 ?s rdf:type schema:Periodical .
-                ?s schema:identifier ?o . 
+                ?s schema:identifier ?id . 
                 ?s schema:name ?title . 
                 ?s schema:inLanguage ?languages .
                 ?s schema:publisher ?publisher .
@@ -544,7 +541,7 @@ class JournalQueryHandler(QueryHandler):
             }} 
             """
             
-            journal_df = sparql_dataframe.get(endpoint, journal_query, True).rename(columns={"o": "journal-ids"})
+            journal_df = sparql_dataframe.get(endpoint, journal_query, True).rename(columns={"id": "journal-ids"})
             return journal_df
         
         except Exception as e:
@@ -557,10 +554,10 @@ class JournalQueryHandler(QueryHandler):
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
-        SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
         WHERE {{ 
             ?s rdf:type schema:Periodical .
-            ?s schema:identifier ?o . 
+            ?s schema:identifier ?id . 
             ?s schema:name ?title . 
             ?s schema:inLanguage ?languages .
             ?s schema:publisher ?publisher .
@@ -573,7 +570,7 @@ class JournalQueryHandler(QueryHandler):
         """
 
         try:
-            titles_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"o": "journal-ids"})
+            titles_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
             return titles_df
         except Exception as e:
             print(f"Error in the SPARQL query: {e}")
@@ -585,10 +582,10 @@ class JournalQueryHandler(QueryHandler):
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
-        SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
         WHERE {{ 
             ?s rdf:type schema:Periodical .
-            ?s schema:identifier ?o . 
+            ?s schema:identifier ?id . 
             ?s schema:name ?title . 
             ?s schema:inLanguage ?languages .
             ?s schema:publisher ?publisher .
@@ -598,10 +595,9 @@ class JournalQueryHandler(QueryHandler):
 
             FILTER CONTAINS(LCASE(STR(?title)), LCASE("{partialName}"))
         }} 
-        }}
         """
         try:
-            df = sparql_dataframe.get(endpoint, query, True).rename(columns={"o": "journal-ids"})
+            df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
             return df
         except Exception as e:
             print(f"Error in SPARQL query: {e}")
@@ -616,10 +612,10 @@ class JournalQueryHandler(QueryHandler):
             PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
-            SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+            SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
             WHERE {{ 
                 ?s rdf:type schema:Periodical .
-                ?s schema:identifier ?o . 
+                ?s schema:identifier ?id . 
                 ?s schema:name ?title . 
                 ?s schema:inLanguage ?languages .
                 ?s schema:publisher ?publisher .
@@ -630,7 +626,7 @@ class JournalQueryHandler(QueryHandler):
                 FILTER (?license IN ("{license_list}"))
             }}
             """
-            jou_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"o": "journal-ids"})
+            jou_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
             return jou_df.fillna('')  
 
         except Exception as e:      
@@ -645,10 +641,10 @@ class JournalQueryHandler(QueryHandler):
             PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
-            SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+            SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
             WHERE {{
                 ?s rdf:type schema:Periodical .
-                ?s schema:identifier ?o . 
+                ?s schema:identifier ?id . 
                 ?s schema:name ?title . 
                 ?s schema:inLanguage ?languages .
                 ?s schema:publisher ?publisher .
@@ -662,7 +658,7 @@ class JournalQueryHandler(QueryHandler):
             # After a million times of loading the data the query works correctly filtering ONLY the Journals with APC (apc = true)
             # if this was actually what was required...
             
-            jouAPC_df = sparql_dataframe.get(endpoint, jouAPC_query, True).rename(columns={"o": "journal-ids"})
+            jouAPC_df = sparql_dataframe.get(endpoint, jouAPC_query, True).rename(columns={"id": "journal-ids"})
             return jouAPC_df
         
         except Exception as e:
@@ -676,10 +672,10 @@ class JournalQueryHandler(QueryHandler):
             PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
-            SELECT ?o ?title ?languages ?publisher ?seal ?license ?apc
+            SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
             WHERE {
                 ?s rdf:type schema:Periodical .
-                ?s schema:identifier ?o . 
+                ?s schema:identifier ?id . 
                 ?s schema:name ?title . 
                 ?s schema:inLanguage ?languages .
                 ?s schema:publisher ?publisher .
@@ -691,7 +687,7 @@ class JournalQueryHandler(QueryHandler):
             }
             """
             
-            journal_DOAJ_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"o": "journal-ids"})
+            journal_DOAJ_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
             return journal_DOAJ_df
         
         except Exception as e:
