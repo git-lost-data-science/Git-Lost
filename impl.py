@@ -135,12 +135,12 @@ class UploadHandler(Handler):
     def __init__(self):
         super().__init__()
 
-    def pushDataToDb(self, path: str) -> bool: # Nico & Martina
+    def pushDataToDb(self, path: str) -> bool: 
         absolute_path = os.path.abspath(path) # Ila: os uses always an absolute path
         if not os.path.exists(absolute_path):
             return False
 
-        if path.endswith(".csv") and isinstance(self, JournalUploadHandler): # as per Gemini's suggestion, each upload handler can now handle files independently of one another
+        if path.endswith(".csv") and isinstance(self, JournalUploadHandler): 
             return self.pushDataToDb(path)
         elif path.endswith(".json") and isinstance(self, CategoryUploadHandler):
             return self.pushDataToDb(path)
@@ -277,7 +277,7 @@ class CategoryUploadHandler(UploadHandler):
             categories_df = pd.DataFrame(rows)
             return categories_df 
     
-    def pushDataToDb(self, path: str) -> bool: # Nico & Martina
+    def pushDataToDb(self, path: str) -> bool: 
         categories_df = self._json_file_to_df(path)
         try:
             with sqlite3.connect(self.dbPathOrUrl) as con:
@@ -297,39 +297,35 @@ class QueryHandler(Handler):
     def __init__(self):
         super().__init__()
 
-    def getById(self, id: str) -> pd.DataFrame: # ?? Nico
-        if isinstance(self, CategoryQueryHandler): # perfect compatibility – there will no longer be issues
-            return self.getById(id)
+    def getById(self, id: str) -> pd.DataFrame: # Ila: let's try like this, maybe it is more controlled...
+        if isinstance(self, CategoryQueryHandler):
+            return CategoryQueryHandler.getById(self, id)
         elif isinstance(self, JournalQueryHandler):
-            return self.getById(id)
-        else: # effectively addresses Peroni's "just_a_test" input
+            return JournalQueryHandler.getById(self, id)
+        else:
             return pd.DataFrame()
 
 class CategoryQueryHandler(QueryHandler):
     def __init__(self):
         super().__init__()
 
-    def getById(self, id: str) -> pd.DataFrame: 
+    def getById(self, id: str) -> pd.DataFrame: # Ila : this is a shorter and faster version than the previous one
         journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
 
-        if not bool(journal_id_pattern.match(id)): 
-            categories_df = self.getCategoryObjectsById(id, "category")
-            areas_df = self.getCategoryObjectsById(id, "area")
-            if not categories_df.empty:
-                categories_df = self.createCategoryObject(categories_df, "category")
-                return categories_df
-            elif not areas_df.empty:
-                areas_df = self.createCategoryObject(areas_df, "area")
-                return areas_df
+        if not journal_id_pattern.match(id): 
+            for field in ["category", "area"]:
+                df = self.getCategoryObjectsById(id, field)
+                if not df.empty:
+                    return self.createCategoryObject(df, field) 
+            
         else: # for matching journal ids to their categories and quartiles
-            possible_journal_ids = id.split(", ")
-            possible_journal_ids.insert(0, id) # inserting the id at the start so it is tested first
+            possible_journal_ids = [id] + id.split(", ") # Ila: fixed the syntax
             for journal_id in possible_journal_ids:
                 journal_ids_df = self.getCategoryObjectsById(journal_id, "journal-ids")
                 if not journal_ids_df.empty:
-                    journal_ids_df = self.createCategoryObject(journal_ids_df, "journal-ids")
-                    return journal_ids_df
-            return pd.DataFrame()
+                    return self.createCategoryObject(journal_ids_df, "journal-ids")
+        
+        return pd.DataFrame()
     
     def createCategoryObject(self, target_df: pd.DataFrame, entity_type: str) -> pd.Series: # ^ N method to avoid redundant repetition of code, homogenises data
         if entity_type == "journal-ids":
@@ -361,7 +357,7 @@ class CategoryQueryHandler(QueryHandler):
             else: 
                 quartiles = None
             
-            target_category = pd.DataFrame([[categories[0], quartiles]], columns=["category", "quartile"])
+            target_category = pd.DataFrame([categories, quartiles], columns=["category", "quartile"])
             return target_category
 
         else:
@@ -1051,30 +1047,23 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
                     result.append(journal)
         return result
     
-    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # Martina
+    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # Marti & Ila
         diamond_journals = []
-
         all_journals = self.getAllJournals()
-        target_areas = [self.getAllAreas() if areas_ids else self.getEntityById(area) for area in areas_ids]
-        target_categories = [self.getAllCategories() if category_ids else self.getEntityById(category) for category in category_ids]
-        target_quartiles = None if not quartiles else quartiles 
 
-        for journal in filter(lambda journal: not journal.hasAPC(), all_journals): # only journals without an APC
-            journal_areas = journal.getAreas() # list of all the areas of the Journal
-            for area in journal_areas:
-                if area in target_areas and journal not in diamond_journals:
-                    diamond_journals.append(journal)
-                    break
-            else: # if no match is found, check categories
-                journal_categories = journal.getCategories() # list of all the Categories of the journal
-                for category in journal_categories:
-                    if category in target_categories and journal not in diamond_journals:
+        target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids] # Ila fixed this part that she wrote wrong
+        target_categories = self.getAllCategories() if not category_ids else [self.getEntityById(category) for category in category_ids]
+        target_quartiles = None if not quartiles else quartiles
+
+        for journal in filter(lambda j: not j.hasAPC(), all_journals):
+            if any(area in target_areas for area in journal.getAreas()): # Ila: added any, if one of the areas is True 
+                diamond_journals.append(journal)
+                continue  # area match is enough
+
+            for category in journal.getCategories():
+                if category in target_categories:
+                    if target_quartiles is None or category.getQuartile() in target_quartiles:
                         diamond_journals.append(journal)
-                        break
-                else:
-                    journal_quartiles = category.getQuartile()
-                    for quartile in journal_quartiles:
-                        if quartile in target_quartiles and journal not in diamond_journals: 
-                            diamond_journals.append(journal)
-                            break
+                        break  # category+quartile match is enough
+
         return diamond_journals
