@@ -332,22 +332,25 @@ class CategoryQueryHandler(QueryHandler):
             return pd.DataFrame()
     
     def createCategoryObject(self, target_df: pd.DataFrame, entity_type: str) -> pd.Series: # ^ N method to avoid redundant repetition of code, homogenises data
-        if entity_type == 'journal-ids':
+        if entity_type == "journal-ids":
             categories_with_quartiles = {}
             areas = set()
             for _, row in target_df.iterrows():
                 categories_with_quartiles[row["category"]] = row.get("quartile")
                 areas.add(row.get("area"))
 
-            category_object_values = [target_df.iloc[0]["journal-ids"], categories_with_quartiles, areas]
-            category_object = pd.DataFrame([category_object_values], columns=["journal-ids", "categories-with-quartiles", "areas"])
-            return category_object
+            journal_category_values = [target_df.iloc[0]["journal-ids"], categories_with_quartiles, areas]
+            journal_category_data = pd.DataFrame([journal_category_values], columns=["journal-ids", "categories-with-quartiles", "areas"])
+            return journal_category_data
 
-        else: 
-            categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
+        elif entity_type == "area":
             areas = list(set(row.get("area") for _, row in target_df.iterrows()))
+            target_area = pd.DataFrame([areas[0]], columns=["area"])
+            return target_area
+
+        elif entity_type == "category":
+            categories = list(set(row.get("category") for _, row in target_df.iterrows())) # sets to prevent duplicates
             unique_quartiles = list(set(row.get("quartile") for _, row in target_df.iterrows() if row.get("quartile") is not None))
-            journal_ids = list(set(row.get("journal-ids") for _, row in target_df.iterrows())) 
 
             if not unique_quartiles:
                 quartiles = None
@@ -357,11 +360,12 @@ class CategoryQueryHandler(QueryHandler):
                 quartiles = ", ".join(sorted(unique_quartiles)) 
             else: 
                 quartiles = None
+            
+            target_category = pd.DataFrame([categories, quartiles], columns=["category", "quartile"])
+            return target_category
 
-            # constructing a new dataframe
-            category_object_values = [entity_type, journal_ids, ", ".join(categories), quartiles, ", ".join(areas)]
-            category_object = pd.DataFrame([category_object_values], columns=["entity-type", "journal-ids", "category", "quartile", "area"])
-            return category_object
+        else:
+            return pd.DataFrame()
 
     def getCategoryObjectsById(self, id: str, entity_type: str) -> pd.DataFrame: # ^ N secondary function
         path = self.getDbPathOrUrl()
@@ -780,15 +784,15 @@ class BasicQueryEngine:
         else:
             for categoryQueryHandler in self.categoryQuery:
                 category_object = categoryQueryHandler.getById(id)
-                if not category_object.empty:
-                    if category_object["entity-type"] == "category":
-                        category_object = category_object.iloc[0]
-                        return Category(category_object["category"], category_object["quartile"])
-                    elif category_object["entity-type"] == "area":
-                        category_object = category_object.iloc[0]
-                        return Area(category_object["area"])
-                else:
-                    return None
+                if "category" in category_object.columns and not category_object["category"].isnull().all(): 
+                    category = category_object.iloc[0]
+                    return Category(category["category"], category["quartile"])
+                if "area" in category_object.columns and not category_object["area"].isnull().all():
+                    area = category_object.iloc[0]
+                    return Area(area["area"])
+                
+            return None # pushed back a line – if it's not in one category query handler, it might be in the next
+            
 
 
     def getAllJournals(self) -> list[Journal]: # ! Ila, requires fixing
@@ -1061,14 +1065,16 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
                 if area in target_areas and journal not in diamond_journals:
                     diamond_journals.append(journal)
                     break
-            journal_categories = journal.getCategories() # list of all the Categories of the journal
-            for category in journal_categories:
-                if category in target_categories and journal not in diamond_journals:
-                    diamond_journals.append(journal)
-                    break
-                journal_quartiles = category.getQuartile()
-                for quartile in journal_quartiles:
-                    if quartile in target_quartiles and journal not in diamond_journals: 
+            else: # if no match is found, check categories
+                journal_categories = journal.getCategories() # list of all the Categories of the journal
+                for category in journal_categories:
+                    if category in target_categories and journal not in diamond_journals:
                         diamond_journals.append(journal)
                         break
+                else:
+                    journal_quartiles = category.getQuartile()
+                    for quartile in journal_quartiles:
+                        if quartile in target_quartiles and journal not in diamond_journals: 
+                            diamond_journals.append(journal)
+                            break
         return diamond_journals
