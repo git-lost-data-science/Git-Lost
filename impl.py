@@ -1,5 +1,6 @@
 import json
 import re
+import numpy
 from typing import Optional, Self
 import os
 
@@ -516,25 +517,24 @@ class JournalQueryHandler(QueryHandler):
             return pd.DataFrame()
 
     def getAllJournals(self): # Martina
-        try:
-            endpoint = self.getDbPathOrUrl()
-            journal_query = f"""
-            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-            PREFIX schema: <https://schema.org/>
+        endpoint = self.getDbPathOrUrl()
+        journal_query = f"""
+        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        PREFIX schema: <https://schema.org/>
 
-            SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
-            WHERE {{ 
-                ?s rdf:type schema:Periodical .
-                ?s schema:identifier ?id . 
-                ?s schema:name ?title . 
-                ?s schema:inLanguage ?languages .
-                ?s schema:publisher ?publisher .
-                ?s schema:hasDOAJSeal ?seal .
-                ?s schema:license ?license .
-                ?s schema:hasAPC ?apc .
-            }} 
-            """
-            
+        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
+        WHERE {{ 
+            ?s rdf:type schema:Periodical .
+            ?s schema:identifier ?id . 
+            ?s schema:name ?title . 
+            ?s schema:inLanguage ?languages .
+            ?s schema:publisher ?publisher .
+            ?s schema:hasDOAJSeal ?seal .
+            ?s schema:license ?license .
+            ?s schema:hasAPC ?apc .
+        }} 
+        """
+        try:    
             journal_df = sparql_dataframe.get(endpoint, journal_query, True).rename(columns={"id": "journal-ids"})
             return journal_df
         
@@ -627,7 +627,7 @@ class JournalQueryHandler(QueryHandler):
             print(f"Connection to SPARQL endpoint failed due to error: {e}") 
             return pd.DataFrame()
 
-            
+        
     def getJournalsWithAPC(self): # Martina
         try:
             endpoint = self.getDbPathOrUrl()
@@ -784,7 +784,7 @@ class BasicQueryEngine:
                     
             return None # pushed back a line – if it's not in one category query handler, it might be in the next
 
-    def getAllCategories(self) -> list[Journal]: # ?? Ila, requires testing
+    def getAllJournals(self) -> list[Journal]: # ?? Ila, requires testing # changed correctly to getAllJournals (it was getAllCategories - a double basically)
         all_journals = [] # Nico fixed this function, requires testing
 
         for journalQueryHandler in self.journalQuery:
@@ -926,22 +926,26 @@ class BasicQueryEngine:
 
         return all_areas
                 
-    def getCategoriesWithQuartile(self, quartiles:set[str]) -> list[Category]: # ! Ila, errors
+    def getCategoriesWithQuartile(self, quartiles:set[str]) -> list[Category]: # ? Ila, fixed hopefully 
         all_data = []
         for categoryQueryHandler in self.categoryQuery:  # it looks at all the queries in the list categoryQuery
             df = categoryQueryHandler.getCategoriesWithQuartile(quartiles)  # calls the previous method on it
             all_data.append(df) # appends the result of that method in a list
-        
-        if all_data:
-            db = pd.concat(all_data, ignore_index=True).drop_duplicates().fillna("")
 
-            result = []
+        if all_data:
+            db = pd.concat(all_data, ignore_index=True).drop_duplicates(subset=["category"]).fillna("")
+
+            result_set = set()
             for _, row in db.iterrows():
-                category_id = row.get("category")  
-                category = self.getEntityById(category_id)
-                if category.quartile in quartiles:
-                    result.append(category)
-            return result
+                category_id = row.get("category")
+                if category_id: 
+                    category = self.getEntityById(category_id)
+                    if category: 
+                        category_quartiles = category.getQuartile()
+                        if quartiles.issubset(category_quartiles):
+                            result_set.add(category) 
+
+            return list(result_set) 
         else:
             return []
         
@@ -971,23 +975,23 @@ class BasicQueryEngine:
         else:
             return []
             
-def getAreasAssignedToCategories(self, category_ids: set[str]) -> list[Area]: # * Nico, done and working 
-    assigned_areas = []
+    def getAreasAssignedToCategories(self, category_ids: set[str]) -> list[Area]: # * Nico, done and working 
+        assigned_areas = []
 
-    for categoryQueryHandler in self.categoryQuery:
-        category_df = categoryQueryHandler.getAreasAssignedToCategories(category_ids)
+        for categoryQueryHandler in self.categoryQuery:
+            category_df = categoryQueryHandler.getAreasAssignedToCategories(category_ids)
 
-        if not category_df.empty:
-            category_match = {str(category_id).lower() for category_id in category_ids}
-            categories_match = category_df["category"].astype(str).str.lower().isin(category_match)
-            categories = category_df[categories_match]
+            if not category_df.empty:
+                category_match = {str(category_id).lower() for category_id in category_ids}
+                categories_match = category_df["category"].astype(str).str.lower().isin(category_match)
+                categories = category_df[categories_match]
 
-            for area_name in categories["area"]:
-                area = self.getEntityById(area_name)
-                if area not in assigned_areas: # working thanks to the definition of equality in the IdentifiableEntity class
-                    assigned_areas.append(area)
+                for area_name in categories["area"]:
+                    area = self.getEntityById(area_name)
+                    if area not in assigned_areas: # working thanks to the definition of equality in the IdentifiableEntity class
+                        assigned_areas.append(area)
 
-    return assigned_areas
+        return assigned_areas
 
 class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Journal objects
     def __init__(self):
@@ -1071,13 +1075,13 @@ def getEntitiesFromList(entities: list | IdentifiableEntity, result_type: str):
         if entity is not None:
             if result_type == "journal" or result_type == "journals":
                 journal_outputs = [", ".join(entity.getIds()), 
-                                   entity.getTitle(), 
-                                   ", ".join(entity.getLanguages()), 
-                                   entity.getPublisher(), 
-                                   entity.hasDOAJSeal(), 
-                                   entity.getLicense(), 
-                                   entity.hasAPC()
-                                   ]
+                                entity.getTitle(), 
+                                ", ".join(entity.getLanguages()), 
+                                entity.getPublisher(), 
+                                entity.hasDOAJSeal(), 
+                                entity.getLicense(), 
+                                entity.hasAPC()
+                                ]
                 journal_columns = [
                         "journal-ids", 
                         "title", 
