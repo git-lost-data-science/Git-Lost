@@ -616,13 +616,13 @@ class JournalQueryHandler(QueryHandler):
     def getJournalsWithLicense(self, licenses: set[str]): # ?? Rumana, is the format appropriate?
         endpoint = self.getDbPathOrUrl()
         try:
-            license_list = '", "'.join(licenses)
+            license_filters = ', '.join([f'lcase("{lic.lower()}")' for lic in licenses])
             query = f"""
-            PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX schema: <https://schema.org/>
 
             SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
-            WHERE {{ 
+            WHERE {{
                 ?s rdf:type schema:Periodical .
                 ?s schema:identifier ?id . 
                 ?s schema:name ?title . 
@@ -632,9 +632,11 @@ class JournalQueryHandler(QueryHandler):
                 ?s schema:license ?license .
                 ?s schema:hasAPC ?apc .
 
-                FILTER (?license IN ("{license_list}"))
+                FILTER (lcase(str(?license)) IN ({license_filters}))
             }}
             """
+
+
             jou_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
             return jou_df  
 
@@ -836,7 +838,7 @@ class BasicQueryEngine:
 
         return published_journals
 
-    def getJournalsWithLicense(self, licenses:set[str]) -> list[Journal]: # ! Rumana, not working  ! ["id"] not in index
+    def getJournalsWithLicense(self, licenses:set[str]) -> list[Journal]: # ! Rumana, fixed
         all_journal_dfs = []
 
         for handler in self.journalQuery:
@@ -849,13 +851,16 @@ class BasicQueryEngine:
             return []
 
         db = pd.concat(all_journal_dfs, ignore_index=True).drop_duplicates()
-        db = db[['id', 'title', 'publisher', 'languages', 'license', 'apc', 'seal']].fillna('')
+        db = db[['journal-ids', 'title', 'publisher', 'languages', 'license', 'apc', 'seal']].fillna('')
         db['license'] = db['license'].str.strip()
         db = db[db['license'].isin(licenses)]
 
+
+
+
         result = []
         for _, row in db.iterrows():
-            journal_id = row.get('id')
+            journal_id = row.get('journal_ids')
             journal = self.getEntityById(journal_id)
             if journal:
                 result.append(journal)
