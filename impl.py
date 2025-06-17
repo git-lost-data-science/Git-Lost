@@ -11,6 +11,7 @@ import sqlite3
 import sparql_dataframe 
 from rdflib.plugins.stores.sparqlstore import SPARQLUpdateStore
 
+
 class TypeMismatchError(Exception):
     def __init__(self, expected_type_description: str, obj: object):
         actual_type_name = type(obj).__name__
@@ -437,6 +438,9 @@ class CategoryQueryHandler(QueryHandler):
             return pd.DataFrame()  
 
     def getCategoriesAssignedToAreas(self, area_ids: set[str]) -> pd.DataFrame: # * Ila, working
+        
+        """         it returns a data frame containing all the categories assigned to particular areas specified as input, with no repetitions. In case the input collection of areas is empty, it is like all areas are actually specified. """
+
         path = self.getDbPathOrUrl()
         try:
             with sqlite3.connect(path) as con:
@@ -585,9 +589,13 @@ class JournalQueryHandler(QueryHandler):
             return pd.DataFrame()
 
     def getJournalsPublishedBy(self, partialName: str): # ?? Ila : works with "University of Bologna", but not with "Università degli Studi di Torino". 
-        # ?? ^^ This is strange because it seems to work fine on Blazegraph
-        # ?? double check everything...
+        # ?? Works on Blazegraph
+        # ! I have changed it, so it needs to be tested 
+        """         It returns a list of objects having class Journal containing all the journals in DOAJ that have, as a publisher, any that matches (even partially) with the input string. """
+
         endpoint = self.getDbPathOrUrl()
+        safe_partialName = json.dumps(partialName)[1:-1] # for controlling special characters- the json method adds the quotes and [1: -1] removes them
+        
         query = f"""
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
@@ -603,7 +611,7 @@ class JournalQueryHandler(QueryHandler):
             ?s schema:license ?license .
             ?s schema:hasAPC ?apc .
 
-            FILTER CONTAINS(LCASE(STR(?publisher)), LCASE("{partialName}"))
+            FILTER CONTAINS(LCASE(STR(?publisher)), LCASE("{safe_partialName}"))
         }} 
         """
         try:
@@ -701,15 +709,15 @@ class JournalQueryHandler(QueryHandler):
             return pd.DataFrame()
 
 class BasicQueryEngine:
-    def __init__(self): 
-        self.journalQuery = []
-        self.categoryQuery = []
+    def __init__(self, journalQuery, categoryQuery): # ? Ila 
+        self.journalQuery = journalQuery if journalQuery is not None else []
+        self.categoryQuery = categoryQuery if categoryQuery is not None else []
 
-    def cleanJournalHandlers(self) -> bool: # ?? Ila, done (test)
+    def cleanJournalHandlers(self) -> bool: # ?? Ila, done
         self.journalQuery = []
         return True
                  
-    def cleanCategoryHandlers(self) -> bool: # ?? Ila, done (test)
+    def cleanCategoryHandlers(self) -> bool: # ?? Ila, done 
         self.categoryQuery = []
         return True  
          
@@ -793,15 +801,17 @@ class BasicQueryEngine:
 
             return None # pushed back a line – if it's not in one category query handler, it might be in the next
 
-    def getAllJournals(self) -> list[Journal]: # ! Ila, not working, undiagnosed error, runs infinitely, previously a disk I/O error
-        all_journals = [] # Nico fixed this function, requires testing
+    def getAllJournals(self) -> list[Journal]: # ! Ila, fixed, to be tested
+        #  it returns a data frame containing all the journals included in the database. 
+        all_journals = [] 
 
         for journalQueryHandler in self.journalQuery:
             journal_df = journalQueryHandler.getAllJournals()
             if not journal_df.empty:
-                for journal_ids in journal_df["journal-ids"]:
-                    journal = self.getEntityById(journal_ids)
-                    all_journals.append(journal)
+                for journal_ids in journal_df["journal-ids"]: # takes the id of the current Journal
+                    journal = self.getEntityById(journal_ids) # created the Journal Object with the id
+                    if journal:
+                        all_journals.append(journal) # appends the object to the list
 
         return all_journals
 
@@ -867,26 +877,16 @@ class BasicQueryEngine:
 
         return result
             
-    def getJournalsWithAPC(self) -> list[Journal]: # ! Ila, not working, undiagnosed error, runs infinitely, previously a disk I/O error
-        all_data = []
-        result = []
-
+    def getJournalsWithAPC(self) -> list[Journal]: # ! Ila: fixed, to be tested   
+        # it returns a data frame containing all the journals that do specify an Article Processing Charge (APC).
+        journals_with_APC= []
         for journalQueryHandler in self.journalQuery:  # it looks at all the queries in the list journalQuery
             df = journalQueryHandler.getJournalsWithAPC()  # calls the previous method on it
-            all_data.append(df) # appends the result of that method in a list
-
-        if all_data:
-            all_data = pd.concat(all_data, ignore_index=True).drop_duplicates().fillna("")
-
-            for _, row in all_data.iterrows():
-                journal_id = row.get("journal-ids")  
-                journal = self.getEntityById(journal_id)
-                if journal:
-                    result.append(journal)
-
-            return result
-        else:
-            return []
+            if not df.empty:        
+                for id in df["journal-ids"]:
+                    journal = self.getEntityById(id)
+                    journals_with_APC.append(journal)
+        return journals_with_APC
             
     def getJournalsWithDOAJSeal(self) -> list[Journal]: # ! Martina, not working, undiagnosed error, runs infinitely
         jou_seal = []
@@ -937,29 +937,20 @@ class BasicQueryEngine:
 
         return all_areas
                 
-    def getCategoriesWithQuartile(self, quartiles:set[str]) -> list[Category]: # ! Ila, not working, 'NoneType' object is not iterable
-        all_data = []
+    def getCategoriesWithQuartile(self, quartiles:set[str]) -> list[Category]: # ! Ila, done, to be tested
+        """         it returns a list of objects having class Category containing all the categories in Scimago Journal Rank having specified, as input, particular quartiles, with no repetitions. In case the input collection of quartiles is empty, it is like all quartiles are actually specified. """
+        cat_with_quartiles = set()
+        if not quartiles: # this case should be handlad by the getbyId and the methods it calls 
+            quartiles = {"Q1", "Q2", "Q3", "Q4"}
 
-        for categoryQueryHandler in self.categoryQuery:  # it looks at all the queries in the list categoryQuery
-            df = categoryQueryHandler.getCategoriesWithQuartile(quartiles)  # calls the previous method on it
-            all_data.append(df) # appends the result of that method in a list
+        for categoryQueryHandler in self.categoryQuery:
+            df = categoryQueryHandler.getCategoriesWithQuartile(quartiles)
+            if not df.empty:
+                for id in df["category"]:
+                    cat = self.getEntityById(id)
+                    cat_with_quartiles.add(cat)
 
-        if all_data:
-            db = pd.concat(all_data, ignore_index=True).drop_duplicates(subset=["category"]).fillna("")
-
-            result_set = set()
-            for _, row in db.iterrows():
-                category_id = row.get("category")
-                if category_id: 
-                    category = self.getEntityById(category_id)
-                    if category: 
-                        category_quartiles = category.getQuartile()
-                        if quartiles.issubset(category_quartiles):
-                            result_set.add(category) 
-
-            return list(result_set) 
-        else:
-            return []
+        return list(cat_with_quartiles)   
         
     def getCategoriesAssignedToAreas(self, areas_ids: set[str]) -> list[Category]: # ! Martina, not working, list issue –  'generator' object has no attribute 'isin'
         cat_areas = []
@@ -1036,24 +1027,17 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
 
         return journals_in_categories
 
-    def getJournalsInAreasWithLicense(self, areas_ids:set[str], licenses: set[str]) -> list[Journal]: # ?? Ila, requires testing once other methods work
-        if not areas_ids and not licenses: # if there are no areas nor licenses specified, then all the journal objects are returned 
-            return self.getAllJournals()
-        
-        if not areas_ids: # if there are no areas specified, then all the journal with the specified licenses are returned
-            return self.getJournalsWithLicense(licenses)
-        
-        journals_with_license = self.getJournalsWithLicense(licenses) # else, we need to return all the Journal objects that have a license and from those journals, take all the journals in the specified area
-        result = []
+    def getJournalsInAreasWithLicense(self, areas_ids:set[str], licenses: set[str]) -> list[Journal]: # ! Ila, working on it
 
-        for journal in journals_with_license:
-            journal_areas = journal.getAreas() # getting each area
-            for area in journal_areas:
-                if area in areas_ids:
-                    result.append(journal)
-        return result
+        """         it returns a list of objects having class Journal containing all the journals in DOAJ with at least one of the licenses specific as input, and that have at least one of the input areas specified in Scimago Journal Rank, with no repetitions. In case the input collection of areas/licenses are empty, it is like all areas/licenses are actually specified. """
+
+        pass
+                    
     
     def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # ?? Ila, Marti & Nico requires testing once other methods work
+
+        """         it returns a list of objects having class Journal containing all the journals in DOAJ that have at least one of the input categories (with the related quartiles) specified and at least one of the areas specified in Scimago Journal Rank, with no repetitions. In addition, only journals that do not have an Article Processing Charge should be considered in the result. In case the input collection of categories/quartiles/areas are empty, it is like all categories/quartiles/areas are actually specified. """
+
         diamond_journals = []
         all_journals = self.getAllJournals()
 
