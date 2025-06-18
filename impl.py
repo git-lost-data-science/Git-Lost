@@ -619,38 +619,36 @@ class JournalQueryHandler(QueryHandler):
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
             
-    def getJournalsWithLicense(self,  licenses: set[str]) -> pd.DataFrame:
-    
-            endpoint = self.getDbPathOrUrl()
+    def getJournalsWithLicense(self, partial_license: str) -> pd.DataFrame:
+        
+        endpoint = self.getDbPathOrUrl()
 
-            partial_l = licenses.strip().lower()
+        safe_partial = json.dumps(partial_license.strip().lower())[1:-1]
 
-            query = f"""
-            PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-            PREFIX schema: <https://schema.org/>
+        query = f"""
+        PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        PREFIX schema: <https://schema.org/>
 
-            SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
-            WHERE {{
-                ?s rdf:type            schema:Periodical .
-                ?s schema:identifier   ?id .
-                ?s schema:name         ?title .
-                ?s schema:inLanguage   ?languages .
-                ?s schema:publisher    ?publisher .
-                ?s schema:hasDOAJSeal  ?seal .
-                ?s schema:license      ?license .
-                ?s schema:hasAPC       ?apc .
+        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
+        WHERE {{
+            ?s rdf:type            schema:Periodical .
+            ?s schema:identifier   ?id .
+            ?s schema:name         ?title .
+            ?s schema:inLanguage   ?languages .
+            ?s schema:publisher    ?publisher .
+            ?s schema:hasDOAJSeal  ?seal .
+            ?s schema:license      ?license .
+            ?s schema:hasAPC       ?apc .
 
-                FILTER CONTAINS(LCASE(STR(?license)), "{partial_l}")
-            }}
-            """
-
-            try:
-                jou_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
-                return jou_df
-
-            except Exception as e:
-                self.unexpectedDatabaseError(e)
-                return pd.DataFrame()
+            FILTER CONTAINS(LCASE(STR(?license)), LCASE("{safe_partial}"))
+        }}
+        """
+        try:
+            journals_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
+            return journals_df
+        except Exception as e:
+            self.unexpectedDatabaseError(e)
+            return pd.DataFrame()
 
          
     def getJournalsWithAPC(self): # * Martina, working
@@ -816,26 +814,18 @@ class BasicQueryEngine:
 
         return all_journals
 
-    def getJournalsWithTitle(self, partialTitle:str) ->list[Journal]: # ! Martina - value ambiguity in if db['title']...
-        all_jou = []
-        result = []
+    def getJournalsWithTitle(self, partialTitle:str) ->list[Journal]: # Martina = STAR (start)
+            result = []
 
-        for journalQueryHandler in self.journalQuery: 
-            journal_df = journalQueryHandler.getJournalsWithTitle(partialTitle)
-            all_jou.append(journal_df)
-
-        if all_jou:                                 # CHANGES: should be without the 'not' so pd.concat can raise an error if it's empty
-            db = pd.concat(all_jou, ignore_index=True).drop_duplicates().fillna('')
-            partialTitle = partialTitle.replace('"', '\\"')   # trying this thing
-            
-            for _, row in db.iterrows():
-                if db['title'].astype(str).str.lower().str.contains(partialTitle, na=False):
-                    j_id = row.get('journal-ids')
-                    jou_obj = self.getEntityById(j_id)
-                    result.append(jou_obj)
+            for journalQueryHandler in self.journalQuery: 
+                journal_df = journalQueryHandler.getJournalsWithTitle(partialTitle)
+                
+                if not journal_df.empty:
+                    journal_df = journal_df.drop_duplicates().fillna('')
+                    for value in journal_df['journal-ids']:
+                        jou_obj = self.getEntityById(value)
+                        result.append(jou_obj)
             return result
-        else:
-            return []
         
     def getJournalsPublishedBy(self, partialName: str) -> list[Journal]: # * Nico, working
         published_journals = []
@@ -940,31 +930,22 @@ class BasicQueryEngine:
 
         return categories_with_quartiles
         
-    def getCategoriesAssignedToAreas(self, areas_ids: set[str]) -> list[Category]: # ! Martina, not working, list issue –  'generator' object has no attribute 'isin'
-        cat_areas = []
-        assigned_cat = []
+    def getCategoriesAssignedToAreas(self, areas_ids: set[str]) -> list[Category]: # Martina ... (STAR)
+            assigned_cat = []
 
-        for categoryQueryHandler in self.categoryQuery: 
-            category_df = categoryQueryHandler.getCategoriesAssignedToAreas(areas_ids)
-            cat_areas.append(category_df)
-
-        if cat_areas:            # CHANGES: should be without the 'not' so pd.concat can raise an error if it's empty           
-            db = pd.concat(cat_areas, ignore_index=True).drop_duplicates().fillna('')
-            
-            norm_areas = {str(a_id).lower() for a_id in areas_ids}
-            seen_categories = set()
-            for _, row in db.iterrows():
-                area = (str(area).lower() for area in row['area'])
-                if area.isin(norm_areas, na=False):
-                    cat_id = row.get('category')
-                    category = self.getEntityById(cat_id)
-                    if category not in seen_categories:
-                        seen_categories.add(category)
-                        assigned_cat.append(category)
+            for categoryQueryHandler in self.categoryQuery: 
+                category_df = categoryQueryHandler.getCategoriesAssignedToAreas(areas_ids)
+                
+                if not category_df.empty:
+                    input_areas = {str(a_id).lower() for a_id in areas_ids}
+                    match_area = category_df['area'].astype(str).str.lower().isin(input_areas)
+                    areas = category_df[match_area]
+                    
+                    for area_id in areas['category']:
+                        category = self.getEntityById(area_id)
+                        if category not in assigned_cat:
+                            assigned_cat.append(category)
             return assigned_cat
-
-        else:
-            return []
             
     def getAreasAssignedToCategories(self, category_ids: set[str]) -> list[Area]: # * Nico, working
         assigned_areas = []
