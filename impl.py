@@ -803,20 +803,50 @@ class BasicQueryEngine:
 
             return None # pushed back a line – if it's not in one category query handler, it might be in the next
 
-    def getAllJournals(self) -> list[Journal]: # * Ila, working but slowly
-        all_journals = [] 
+    def getAllJournals(self) -> list[Journal]: # Ila, tested, working
+        return self._getLimitedJournals(limit=None)  # limiting the number of the journals for testing purposes 
+
+    def _getLimitedJournals(self, limit: int) -> list[Journal]:
+        
+        all_journals = []
+        seen_ids = set()
 
         for journalQueryHandler in self.journalQuery:
             journals_df = journalQueryHandler.getAllJournals()
             if journals_df.empty:
                 continue
 
-            for journal_ids in journals_df["journal-ids"]: 
-                journal = self.getEntityById(journal_ids) 
-                if journal not in all_journals:
-                    all_journals.append(journal) 
+            for journal_id in journals_df["journal-ids"]:
+                if journal_id in seen_ids:
+                    continue
+
+                journal = self.getEntityById(journal_id)
+                if journal is not None:
+                    all_journals.append(journal)
+                    seen_ids.add(journal_id)
+
+                if limit is not None and len(all_journals) >= limit:
+                    return all_journals
 
         return all_journals
+
+
+    # def getAllJournals(self) -> list[Journal]: # * Ila, working but slowly
+    #     all_journals = [] 
+
+    #     for journalQueryHandler in self.journalQuery:
+    #         journals_df = journalQueryHandler.getAllJournals()
+    #         if journals_df.empty:
+    #             continue
+
+    #         for journal_ids in journals_df["journal-ids"]: 
+    #             journal = self.getEntityById(journal_ids) 
+    #             if journal not in all_journals:
+    #                 all_journals.append(journal) 
+
+    #     return all_journals
+
+
 
     def getJournalsWithTitle(self, partialTitle: str) ->list[Journal]: # * Martina, working
         journals_with_title = []
