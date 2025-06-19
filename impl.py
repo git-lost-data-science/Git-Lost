@@ -612,6 +612,52 @@ class JournalQueryHandler(QueryHandler):
         except Exception as e:
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
+
+
+
+
+
+
+    def getJournalsWithLicense(self, licenses: str | set[str]) -> pd.DataFrame:
+        endpoint = self.getDbPathOrUrl()
+       
+        if isinstance(licenses, str):      #both string and set
+            l_set = {licenses.strip().lower()}
+        else:
+            l_set = {l.strip().lower() for l in licenses}
+
+    
+        filters = []   # For partial match, use CONTAINS, for exact match use '='
+        for license_val in l_set:
+         
+            license_val_escaped = license_val.replace('"', '\\"')   #to escape double quotes
+            filters.append(f'CONTAINS(LCASE(STR(?license)), "{license_val_escaped}")')  # For partial match
+           
+            # filters.append(f'LCASE(STR(?license)) = "{license_val_escaped}"')  # For exact match
+        filter_clause = " || ".join(filters)
+
+        query = f"""
+        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        PREFIX schema: <https://schema.org/>
+        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
+        WHERE {{
+            ?s rdf:type schema:Periodical ;
+            schema:identifier ?id ;
+            schema:name ?title ;
+            schema:inLanguage ?languages ;
+            schema:publisher ?publisher ;
+            schema:hasDOAJSeal ?seal ;
+            schema:license ?license ;
+            schema:hasAPC ?apc .
+            FILTER ({filter_clause})
+        }}
+        """
+        try:
+            jou_df = sparql_dataframe.get(endpoint, query, True)
+            return jou_df.rename(columns={"id": "journal-ids"})
+        except Exception as e:
+            self.unexpectedDatabaseError(e)
+            return pd.DataFrame()
             
     def getJournalsWithLicense(self, licenses: str) -> pd.DataFrame: # ?? Rumana, not complaint with sets, but works with strings as input...
         endpoint = self.getDbPathOrUrl()
