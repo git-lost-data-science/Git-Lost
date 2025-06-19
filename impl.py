@@ -613,11 +613,6 @@ class JournalQueryHandler(QueryHandler):
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
 
-
-
-
-
-
     def getJournalsWithLicense(self, licenses: str | set[str]) -> pd.DataFrame:
         endpoint = self.getDbPathOrUrl()
        
@@ -658,37 +653,6 @@ class JournalQueryHandler(QueryHandler):
         except Exception as e:
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
-            
-    def getJournalsWithLicense(self, licenses: str) -> pd.DataFrame: # ?? Rumana, not complaint with sets, but works with strings as input...
-        endpoint = self.getDbPathOrUrl()
-        safe_partial = json.dumps(licenses.strip().lower())[1:-1]
-
-        query = f"""
-        PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-        PREFIX schema: <https://schema.org/>
-
-        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
-        WHERE {{
-            ?s rdf:type schema:Periodical .
-            ?s schema:identifier ?id .
-            ?s schema:name ?title .
-            ?s schema:inLanguage ?languages .
-            ?s schema:publisher ?publisher .
-            ?s schema:hasDOAJSeal ?seal .
-            ?s schema:license ?license .
-            ?s schema:hasAPC ?apc .
-
-            FILTER CONTAINS(LCASE(STR(?license)), LCASE("{safe_partial}"))
-        }}
-        """
-        try:
-            journals_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
-            return journals_df
-        except Exception as e:
-            self.unexpectedDatabaseError(e)
-            return pd.DataFrame()
-
-
          
     def getJournalsWithAPC(self): # * Martina, working
         endpoint = self.getDbPathOrUrl()
