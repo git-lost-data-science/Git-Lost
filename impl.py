@@ -1036,23 +1036,15 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
         return journals_in_categories
 
     def getJournalsInAreasWithLicense(self, areas_ids:set[str], licenses: set[str]) -> list[Journal]: # ?? Ila, requires testing once other methods work
-        if not areas_ids and not licenses: # if there are no areas nor licenses specified, then all the journal objects are returned 
-            return self.getAllJournals()
-        
-        if not areas_ids: # if there are no areas specified, then all the journal with the specified licenses are returned
-            return self.getJournalsWithLicense(licenses)
-        
-        journals_with_license = self.getJournalsWithLicense(licenses) # else, we need to return all the Journal objects that have a license and from those journals, take all the journals in the specified area
-        input_areas = [self.getEntityById(area) for area in areas_ids]
-        
+        target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids] # getting all the areas 
+        jou_with_license= self.getJournalsWithLicense(licenses)
         result = []
 
-        for journal in journals_with_license:
-            journal_areas = journal.getAreas() # getting each area
-            for area in journal_areas:
-                if area in input_areas:
-                    result.append(journal)
-
+        for jou in jou_with_license: # for every journal in the journals with the specified licenses 
+            jou_areas= jou.getAreas # get the areas of that journal 
+            for area in jou_areas: # for every area in the areas of the current journal
+                if area in target_areas: # if the area is in the targeted areas, append the journal 
+                    result.append(jou)
         return result
     
     def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # ?? Ila, Marti & Nico requires testing once other methods work
