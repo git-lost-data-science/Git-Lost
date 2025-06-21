@@ -404,43 +404,39 @@ class CategoryQueryHandler(QueryHandler):
             self.unexpectedDatabaseError(e)
             return pd.DataFrame() # in order to always return a DataFrame object, even if the queries fails for some reason.   
 
-    def getCategoriesWithQuartile(self, quartiles: set[str]) -> pd.DataFrame: # * Nico, working
+    def getCategoriesWithQuartile(self, quartiles: Optional[set[str]]) -> pd.DataFrame: # * Nico, working
         path = self.getDbPathOrUrl() # a safer way to access the path than directly accessing the variable
-        categories = [] 
+        categories_with_quartiles_df = pd.DataFrame([], columns=["category", "quartile"])
 
         try:
             with sqlite3.connect(path) as con:
                 if not quartiles:
                     query = """
-                    SELECT DISTINCT category, quartile 
+                    SELECT DISTINCT category
                     FROM Category;
                     """
-                    category_df = pd.read_sql(query, con)
-                    categories.append(category_df)
+                    category_df = pd.read_sql(query, con).iloc[::-1]
+                    
                 else:
-                    query = """
-                    SELECT DISTINCT category, quartile 
+                    query = f"""
+                    SELECT DISTINCT category
                     FROM Category 
-                    WHERE quartile = ?;
+                    WHERE {" OR ".join(["quartile = ?" for _ in quartiles])}
                     """
-                    for quartile_value in quartiles: # ? Testing one quartile at a time, addresses the blank case
-                        category_df = pd.read_sql(query, con, params=(quartile_value,))
-                        categories.append(category_df)
+                    category_df = pd.read_sql(query, con,  params=[f"{quartile}" for quartile in quartiles]).iloc[::-1]
             
-            if not categories:
-                return pd.DataFrame()
+            for _, row in category_df.iterrows():
+                category_id = row.get("category")
+                new_category = self.getById(category_id)
+                categories_with_quartiles_df = pd.concat([new_category, categories_with_quartiles_df], ignore_index=True)
 
-            categories_with_quartile_df = pd.concat(categories, ignore_index=True).drop_duplicates()
-            return categories_with_quartile_df
+            return categories_with_quartiles_df
         
         except Exception as e:
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()  
 
     def getCategoriesAssignedToAreas(self, area_ids: set[str]) -> pd.DataFrame: # * Ila, working
-        
-        """         it returns a data frame containing all the categories assigned to particular areas specified as input, with no repetitions. In case the input collection of areas is empty, it is like all areas are actually specified. """
-
         path = self.getDbPathOrUrl()
         try:
             with sqlite3.connect(path) as con:
@@ -588,11 +584,7 @@ class JournalQueryHandler(QueryHandler):
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
 
-    def getJournalsPublishedBy(self, partialName: str): # ?? Ila : works with "University of Bologna", but not with "Università degli Studi di Torino". 
-        # ?? Works on Blazegraph
-        # ! I have changed it, so it needs to be tested 
-        """         It returns a list of objects having class Journal containing all the journals in DOAJ that have, as a publisher, any that matches (even partially) with the input string. """
-
+    def getJournalsPublishedBy(self, partialName: str): # * Ila: works fine even with Torino
         endpoint = self.getDbPathOrUrl()
         safe_partialName = json.dumps(partialName)[1:-1] # for controlling special characters- the json method adds the quotes and [1: -1] removes them
         
@@ -620,38 +612,48 @@ class JournalQueryHandler(QueryHandler):
         except Exception as e:
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
-            
-    def getJournalsWithLicense(self, licenses: set[str]): # ?? Rumana, is the format appropriate?
+
+    def getJournalsWithLicense(self, licenses: str | set[str]) -> pd.DataFrame:
         endpoint = self.getDbPathOrUrl()
+       
+        if isinstance(licenses, str):      #both string and set
+            l_set = {licenses.strip().lower()}
+        else:
+            l_set = {l.strip().lower() for l in licenses}
+
+    
+        filters = []   # For partial match, use CONTAINS, for exact match use '='
+        for license_val in l_set:
+         
+            license_val_escaped = license_val.replace('"', '\\"')   #to escape double quotes
+            filters.append(f'CONTAINS(LCASE(STR(?license)), "{license_val_escaped}")')  # For partial match
+           
+            # filters.append(f'LCASE(STR(?license)) = "{license_val_escaped}"')  # For exact match
+        filter_clause = " || ".join(filters)
+
+        query = f"""
+        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        PREFIX schema: <https://schema.org/>
+        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
+        WHERE {{
+            ?s rdf:type schema:Periodical ;
+            schema:identifier ?id ;
+            schema:name ?title ;
+            schema:inLanguage ?languages ;
+            schema:publisher ?publisher ;
+            schema:hasDOAJSeal ?seal ;
+            schema:license ?license ;
+            schema:hasAPC ?apc .
+            FILTER ({filter_clause})
+        }}
+        """
         try:
-            license_filters = ', '.join([f'lcase("{lic.lower()}")' for lic in licenses])
-            query = f"""
-            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-            PREFIX schema: <https://schema.org/>
-
-            SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
-            WHERE {{
-                ?s rdf:type schema:Periodical .
-                ?s schema:identifier ?id . 
-                ?s schema:name ?title . 
-                ?s schema:inLanguage ?languages .
-                ?s schema:publisher ?publisher .
-                ?s schema:hasDOAJSeal ?seal .
-                ?s schema:license ?license .
-                ?s schema:hasAPC ?apc .
-
-                FILTER (lcase(str(?license)) IN ({license_filters}))
-            }}
-            """
-
-
-            jou_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
-            return jou_df  
-
+            jou_df = sparql_dataframe.get(endpoint, query, True)
+            return jou_df.rename(columns={"id": "journal-ids"})
         except Exception as e:
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
-            
+         
     def getJournalsWithAPC(self): # * Martina, working
         endpoint = self.getDbPathOrUrl()
         jouAPC_query = """
@@ -709,15 +711,15 @@ class JournalQueryHandler(QueryHandler):
             return pd.DataFrame()
 
 class BasicQueryEngine:
-    def __init__(self, journalQuery, categoryQuery): # ? Ila 
-        self.journalQuery = journalQuery if journalQuery is not None else []
-        self.categoryQuery = categoryQuery if categoryQuery is not None else []
+    def __init__(self): # Ila, working 
+        self.journalQuery = []
+        self.categoryQuery = []
 
-    def cleanJournalHandlers(self) -> bool: # ?? Ila, done
+    def cleanJournalHandlers(self) -> bool: # Ila, done
         self.journalQuery = []
         return True
                  
-    def cleanCategoryHandlers(self) -> bool: # ?? Ila, done 
+    def cleanCategoryHandlers(self) -> bool: # Ila, done 
         self.categoryQuery = []
         return True  
          
@@ -755,15 +757,6 @@ class BasicQueryEngine:
 
             if not journal_found:
                 return None
-
-            matching_category_data_found = False
-
-            for categoryQueryHandler in self.categoryQuery:
-                journal_category_data = categoryQueryHandler.getById(id)
-                if not journal_category_data.empty:
-                    matching_category_data_found = True
-                    journal_category_data = journal_category_data.iloc[0]
-                    break
             
             journal = Journal( 
                 journal_object["journal-ids"], 
@@ -774,6 +767,15 @@ class BasicQueryEngine:
                 journal_object["license"], 
                 bool(journal_object["apc"])
             )
+
+            matching_category_data_found = False
+
+            for categoryQueryHandler in self.categoryQuery:
+                journal_category_data = categoryQueryHandler.getById(id)
+                if not journal_category_data.empty:
+                    matching_category_data_found = True
+                    journal_category_data = journal_category_data.iloc[0]
+                    break
 
             if matching_category_data_found: # * Change made: categories and areas are ONLY added if there is matching category data found
                 categories_with_quartiles = journal_category_data["categories-with-quartiles"]
@@ -801,122 +803,135 @@ class BasicQueryEngine:
 
             return None # pushed back a line – if it's not in one category query handler, it might be in the next
 
-    def getAllJournals(self) -> list[Journal]: # ! Ila, fixed, to be tested
-        #  it returns a data frame containing all the journals included in the database. 
-        all_journals = [] 
+    def getAllJournals(self) -> list[Journal]: # Ila, tested, working
+        return self._getLimitedJournals(limit=500)  # limiting the number of the journals for testing purposes 
+
+    def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]:
+        
+        all_journals = []
+        seen_ids = set()
 
         for journalQueryHandler in self.journalQuery:
-            journal_df = journalQueryHandler.getAllJournals()
-            if not journal_df.empty:
-                for journal_ids in journal_df["journal-ids"]: # takes the id of the current Journal
-                    journal = self.getEntityById(journal_ids) # created the Journal Object with the id
-                    if journal:
-                        all_journals.append(journal) # appends the object to the list
+            journals_df = journalQueryHandler.getAllJournals()
+            if journals_df.empty: # it the columns is empty, ignore it, go on 
+                continue
+
+            for journal_id in journals_df["journal-ids"]:
+                if journal_id in seen_ids:
+                    continue # ignore the journal 
+
+                journal = self.getEntityById(journal_id)
+                if journal is not None:
+                    all_journals.append(journal)
+                    seen_ids.add(journal_id)
+
+                if limit is not None and len(all_journals) >= limit: # if the limit has been reached or ignored, return the list made
+                    return all_journals
 
         return all_journals
 
-    def getJournalsWithTitle(self, partialTitle:str) ->list[Journal]: # ! Martina - value ambiguity in if db['title']...
-        all_jou = []
-        result = []
 
-        for journalQueryHandler in self.journalQuery: 
-            journal_df = journalQueryHandler.getJournalsWithTitle(partialTitle)
-            all_jou.append(journal_df)
+    # def getAllJournals(self) -> list[Journal]: # * Ila, working but slowly
+    #     all_journals = [] 
 
-        if all_jou:                                 # CHANGES: should be without the 'not' so pd.concat can raise an error if it's empty
-            db = pd.concat(all_jou, ignore_index=True).drop_duplicates().fillna('')
-            partialTitle = partialTitle.replace('"', '\\"')   # trying this thing
-            
-            for _, row in db.iterrows():
-                if db['title'].astype(str).str.lower().str.contains(partialTitle, na=False):
-                    j_id = row.get('journal-ids')
-                    jou_obj = self.getEntityById(j_id)
-                    result.append(jou_obj)
-            return result
-        else:
-            return []
-        
-    def getJournalsPublishedBy(self, partialName: str) -> list[Journal]: # * Nico, working
-        published_journals = []
+    #     for journalQueryHandler in self.journalQuery:
+    #         journals_df = journalQueryHandler.getAllJournals()
+    #         if journals_df.empty:
+    #             continue
+
+    #         for journal_ids in journals_df["journal-ids"]: 
+    #             journal = self.getEntityById(journal_ids) 
+    #             if journal not in all_journals:
+    #                 all_journals.append(journal) 
+
+    #     return all_journals
+
+    def getJournalsWithTitle(self, partialTitle: str) ->list[Journal]: # * Martina, working
+        journals_with_title = []
 
         for journalQueryHandler in self.journalQuery:
-            journal_df = journalQueryHandler.getJournalsPublishedBy(partialName)
-            if not journal_df.empty:          
-                for value in journal_df["journal-ids"]:
-                    journal = self.getEntityById(value)
-                    published_journals.append(journal)
+            journals_df = journalQueryHandler.getJournalsWithTitle(partialTitle)
+            if journals_df.empty:   
+                continue
 
-        return published_journals
+            for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal not in journals_with_title:
+                    journals_with_title.append(journal)
 
-    def getJournalsWithLicense(self, licenses:set[str]) -> list[Journal]: # ! Rumana, fixed
-        all_journal_dfs = []
+        return journals_with_title
+        
+    def getJournalsPublishedBy(self, partialName: str) -> list[Journal]: # * Nico, working
+        journals_published_by = []
 
-        for handler in self.journalQuery:
-            if isinstance(handler, JournalQueryHandler):
-                df = handler.getJournalsWithLicense(licenses)
-                if not df.empty:
-                    all_journal_dfs.append(df)
+        for journalQueryHandler in self.journalQuery:
+            journals_df = journalQueryHandler.getJournalsPublishedBy(partialName)
+            if journals_df.empty:   
+                continue
 
-        if not all_journal_dfs:
-            return []
+            for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal not in journals_published_by:
+                    journals_published_by.append(journal)
 
-        db = pd.concat(all_journal_dfs, ignore_index=True).drop_duplicates()
-        db = db[['journal-ids', 'title', 'publisher', 'languages', 'license', 'apc', 'seal']].fillna('')
-        db['license'] = db['license'].str.strip()
-        db = db[db['license'].isin(licenses)]
+        return journals_published_by
 
-
-
-
-        result = []
-        for _, row in db.iterrows():
-            journal_id = row.get('journal_ids')
-            journal = self.getEntityById(journal_id)
-            if journal:
-                result.append(journal)
-
-        return result
-            
-    def getJournalsWithAPC(self) -> list[Journal]: # ! Ila: fixed, to be tested   
-        # it returns a data frame containing all the journals that do specify an Article Processing Charge (APC).
-        journals_with_APC= []
-        for journalQueryHandler in self.journalQuery:  # it looks at all the queries in the list journalQuery
-            df = journalQueryHandler.getJournalsWithAPC()  # calls the previous method on it
-            if not df.empty:        
-                for id in df["journal-ids"]:
-                    journal = self.getEntityById(id)
-                    journals_with_APC.append(journal)
-        return journals_with_APC
-            
-    def getJournalsWithDOAJSeal(self) -> list[Journal]: # ! Martina, not working, undiagnosed error, runs infinitely
-        jou_seal = []
-        res_obj = []
+    def getJournalsWithLicense(self, licenses: str) -> list[Journal]: # ?? Rumana, fix the issue in the JournalQueryHandler to fix this function
+        journals_with_license = []
 
         for journalQueryHandler in self.journalQuery: 
-            journal_df = journalQueryHandler.getJournalsWithDOAJSeal()
-            jou_seal.append(journal_df)
+            journals_df = journalQueryHandler.getJournalsWithLicense(licenses) 
+            if journals_df.empty:     
+                continue
 
-        if jou_seal:                               # CHANGES: should be without the 'not' so pd.concat can raise an error if it's empty
-            db = pd.concat(jou_seal, ignore_index=True).drop_duplicates().fillna('')
-            db['seal'] = db['seal'].astype(bool) # ensuring it is treated as a boolean type if anything happens
+            for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal not in journals_with_license:
+                    journals_with_license.append(journal)
+
+        return journals_with_license
             
-            for _, row in db.iterrows():
-                if row['seal'] == True: 
-                    j_id = row.get('journal-ids')
-                    jou_obj = self.getEntityById(j_id)
-                    res_obj.append(jou_obj) 
-            return res_obj
-        else:
-            return []
+    def getJournalsWithAPC(self) -> list[Journal]: # * Ila, works in 20 minutes 
+        journals_with_APC = []
+
+        for journalQueryHandler in self.journalQuery: 
+            journals_df = journalQueryHandler.getJournalsWithAPC() 
+            if journals_df.empty:     
+                continue
+
+            for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal not in journals_with_APC:
+                    journals_with_APC.append(journal)
+
+        return journals_with_APC
+            
+    def getJournalsWithDOAJSeal(self) -> list[Journal]: # * Martina, working
+        journals_with_DOAJ_seal = []
+
+        for journalQueryHandler in self.journalQuery: 
+            journals_df = journalQueryHandler.getJournalsWithDOAJSeal() 
+            if journals_df.empty:   
+                continue
+
+            for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal not in journals_with_DOAJ_seal:
+                    journals_with_DOAJ_seal.append(journal)
+
+        return journals_with_DOAJ_seal                         
 
     def getAllCategories(self) -> list[Category]: # * Nico, working
         all_categories = []
 
         for categoryQueryHandler in self.categoryQuery:
-            category_df = categoryQueryHandler.getAllCategories()
-            if not category_df.empty:
-                for category_id in category_df["category"]:
-                    category = self.getEntityById(category_id)
+            categories_df = categoryQueryHandler.getAllCategories()
+            if categories_df.empty:
+                continue
+
+            for category_id in categories_df["category"]:
+                category = self.getEntityById(category_id)
+                if category not in all_categories:
                     all_categories.append(category)
 
         return all_categories
@@ -925,79 +940,70 @@ class BasicQueryEngine:
         all_areas = []
 
         for categoryQueryHandler in self.categoryQuery:
-            area_df = categoryQueryHandler.getAllAreas()
-            if not area_df.empty:
-                for area_id in area_df["area"]:
-                    entity = self.getEntityById(area_id)
-                    if isinstance(entity, Category): # ?? dealing with the Multidisciplinary case (where the area and category have the same name)
-                        area = Area(entity.getIds()[0])
-                    else:
-                        area = entity
+            areas_df = categoryQueryHandler.getAllAreas()
+            if areas_df.empty:
+                continue
+
+            for area_id in areas_df["area"]:
+                entity = self.getEntityById(area_id)
+                area = Area(entity.getIds()[0]) if isinstance(entity, Category) else entity # ?? dealing with the Multidisciplinary case (where the area and category have the same name)
+                if area not in all_areas:
                     all_areas.append(area)
 
         return all_areas
                 
-    def getCategoriesWithQuartile(self, quartiles:set[str]) -> list[Category]: # ! Ila, done, to be tested
-        """         it returns a list of objects having class Category containing all the categories in Scimago Journal Rank having specified, as input, particular quartiles, with no repetitions. In case the input collection of quartiles is empty, it is like all quartiles are actually specified. """
-        cat_with_quartiles = set()
-        if not quartiles: # this case should be handlad by the getbyId and the methods it calls 
-            quartiles = {"Q1", "Q2", "Q3", "Q4"}
+    def getCategoriesWithQuartile(self, quartiles: Optional[set[str]]) -> list[Category]: # * Ila, working
+        categories_with_quartiles = [] # no need to worry about the no quartiles specified case
 
         for categoryQueryHandler in self.categoryQuery:
-            df = categoryQueryHandler.getCategoriesWithQuartile(quartiles)
-            if not df.empty:
-                for id in df["category"]:
-                    cat = self.getEntityById(id)
-                    cat_with_quartiles.add(cat)
+            categories_df = categoryQueryHandler.getCategoriesWithQuartile(quartiles)
+            if categories_df.empty:
+                continue
 
-        return list(cat_with_quartiles)   
+            for category_id in categories_df["category"]:
+                category = self.getEntityById(category_id)
+                if category not in categories_with_quartiles: # keep as a safety measure in the case that a quartile exists in a separate handler
+                    categories_with_quartiles.append(category)
+
+        return categories_with_quartiles
         
-    def getCategoriesAssignedToAreas(self, areas_ids: set[str]) -> list[Category]: # ! Martina, not working, list issue –  'generator' object has no attribute 'isin'
-        cat_areas = []
-        assigned_cat = []
+    def getCategoriesAssignedToAreas(self, areas_ids: set[str]) -> list[Category]: # * Martina, working
+        assigned_categories = []
 
         for categoryQueryHandler in self.categoryQuery: 
-            category_df = categoryQueryHandler.getCategoriesAssignedToAreas(areas_ids)
-            cat_areas.append(category_df)
-
-        if cat_areas:            # CHANGES: should be without the 'not' so pd.concat can raise an error if it's empty           
-            db = pd.concat(cat_areas, ignore_index=True).drop_duplicates().fillna('')
+            areas_df = categoryQueryHandler.getCategoriesAssignedToAreas(areas_ids)
             
-            norm_areas = {str(a_id).lower() for a_id in areas_ids}
-            seen_categories = set()
-            for _, row in db.iterrows():
-                area = (str(area).lower() for area in row['area'])
-                if area.isin(norm_areas, na=False):
-                    cat_id = row.get('category')
-                    category = self.getEntityById(cat_id)
-                    if category not in seen_categories:
-                        seen_categories.add(category)
-                        assigned_cat.append(category)
-            return assigned_cat
+            if areas_df.empty:
+                continue
 
-        else:
-            return []
+            input_areas = {str(area_id).lower() for area_id in areas_ids}
+            match_area = areas_df["area"].astype(str).str.lower().isin(input_areas)
+            areas = areas_df[match_area]
+            
+            for category_id in areas["category"]:
+                category = self.getEntityById(category_id)
+                if category not in assigned_categories:
+                    assigned_categories.append(category)
+
+        return assigned_categories
             
     def getAreasAssignedToCategories(self, category_ids: set[str]) -> list[Area]: # * Nico, working
         assigned_areas = []
 
         for categoryQueryHandler in self.categoryQuery:
-            category_df = categoryQueryHandler.getAreasAssignedToCategories(category_ids)
+            categories_df = categoryQueryHandler.getAreasAssignedToCategories(category_ids)
+            if categories_df.empty:
+                continue
+            
+            input_categories = {str(category_id).lower() for category_id in category_ids}
+            categories_match = categories_df["category"].astype(str).str.lower().isin(input_categories)
+            categories = categories_df[categories_match]
 
-            if not category_df.empty:
-                category_match = {str(category_id).lower() for category_id in category_ids}
-                categories_match = category_df["category"].astype(str).str.lower().isin(category_match)
-                categories = category_df[categories_match]
-
-                for area_id in categories["area"]:
-                    entity = self.getEntityById(area_id)
-                    if isinstance(entity, Category): # * dealing with the Multidisciplinary case (where the area and category have the same name)
-                        area = Area(entity.getIds()[0])
-                    else:
-                        area = entity
-                    
-                    if area not in assigned_areas: # working thanks to the definition of equality in the IdentifiableEntity class
-                        assigned_areas.append(area)
+            for area_id in categories["area"]:
+                entity = self.getEntityById(area_id)
+                area = Area(entity.getIds()[0]) if isinstance(entity, Category) else entity # ?? dealing with the Multidisciplinary case (where the area and category have the same name)
+                if area not in assigned_areas: # working thanks to the definition of equality in the IdentifiableEntity class
+                    assigned_areas.append(area)
 
         return assigned_areas
 
@@ -1027,17 +1033,20 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
 
         return journals_in_categories
 
-    def getJournalsInAreasWithLicense(self, areas_ids:set[str], licenses: set[str]) -> list[Journal]: # ! Ila, working on it
+    def getJournalsInAreasWithLicense(self, areas_ids:set[str], licenses: set[str]) -> list[Journal]: # ?? Ila, requires testing once other methods work
 
-        """         it returns a list of objects having class Journal containing all the journals in DOAJ with at least one of the licenses specific as input, and that have at least one of the input areas specified in Scimago Journal Rank, with no repetitions. In case the input collection of areas/licenses are empty, it is like all areas/licenses are actually specified. """
+        target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids] # getting all the areas 
+        jou_with_license= self.getJournalsWithLicense(licenses)
+        result = []
 
-        pass
-                    
-    
+        for jou in jou_with_license: # for every journal in the journals with the specified licenses 
+            jou_areas= jou.getAreas # get the areas of that journal 
+            for area in jou_areas: # for every area in the areas of the current journal
+                if area in target_areas: # if the area is in the targeted areas, append the journal 
+                    result.append(jou)
+        return result
+        
     def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # ?? Ila, Marti & Nico requires testing once other methods work
-
-        """         it returns a list of objects having class Journal containing all the journals in DOAJ that have at least one of the input categories (with the related quartiles) specified and at least one of the areas specified in Scimago Journal Rank, with no repetitions. In addition, only journals that do not have an Article Processing Charge should be considered in the result. In case the input collection of categories/quartiles/areas are empty, it is like all categories/quartiles/areas are actually specified. """
-
         diamond_journals = []
         all_journals = self.getAllJournals()
 
@@ -1048,24 +1057,24 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
         for journal in filter(lambda journal: not journal.hasAPC(), all_journals):
             if any(area in target_areas for area in journal.getAreas()): # Ila: added any, if one of the areas is True 
                 diamond_journals.append(journal)
-                continue  # area match is enough
+                continue 
 
             for category in filter(lambda category: category in target_categories, journal.getCategories()): # Nico – only for the categories that are specified in the input are those that can be checked for quartile eligibility
                 if target_quartiles is None or category.getQuartile() in target_quartiles:
                     diamond_journals.append(journal)
-                    break  # category + quartile match is enough
+                    break  
 
         return diamond_journals
 
 # ! ––––––––––––––––––––––––––––––––––––––––––––––––––– For testing purposes only ––––––––––––––––––––––––––––––––––––––––––––––––––– !
 
-def getEntitiesFromList(entities: list[IdentifiableEntity] | IdentifiableEntity, result_type: str, associated_journal_objects: bool = False) -> pd.DataFrame: 
+def getEntitiesFromList(
+    entities: list[IdentifiableEntity] | IdentifiableEntity,
+    result_type: str,
+    associated_journal_objects: bool = False
+) -> pd.DataFrame:
 
-    # a function that Nico made SOLELY for testing purposes. 
-    # This function effectively represents each entity in a dataframe
-    # using this will allow you to do a comparison between the results of the query handlers and the query engines
-
-    if isinstance(entities, IdentifiableEntity): # this is for getEntityById
+    if isinstance(entities, IdentifiableEntity):
         entities = [entities]
 
     return_result = pd.DataFrame()
@@ -1074,24 +1083,25 @@ def getEntitiesFromList(entities: list[IdentifiableEntity] | IdentifiableEntity,
 
     for entity in entities:
         if entity is not None:
-            if result_type == "journal" or result_type == "journals":
-                journal_outputs = [", ".join(entity.getIds()), 
-                                   entity.getTitle(), 
-                                   ", ".join(entity.getLanguages()), 
-                                   entity.getPublisher(), 
-                                   entity.hasDOAJSeal(), 
-                                   entity.getLicense(), 
-                                   entity.hasAPC()
-                                   ]
+            if result_type in ("journal", "journals"):
+                journal_outputs = [
+                    ", ".join(entity.getIds()), 
+                    entity.getTitle(), 
+                    ", ".join(entity.getLanguages()), 
+                    entity.getPublisher(), 
+                    entity.hasDOAJSeal(), 
+                    entity.getLicense(), 
+                    entity.hasAPC()
+                ]
                 journal_columns = [
-                        "journal-ids", 
-                        "title", 
-                        "languages", 
-                        "publisher", 
-                        "seal", 
-                        "license", 
-                        "apc"
-                        ]
+                    "journal-ids", 
+                    "title", 
+                    "languages", 
+                    "publisher", 
+                    "seal", 
+                    "license", 
+                    "apc"
+                ]
                 if return_result.empty:
                     return_result = pd.DataFrame([journal_outputs], columns=journal_columns)
                 else:
@@ -1103,14 +1113,17 @@ def getEntitiesFromList(entities: list[IdentifiableEntity] | IdentifiableEntity,
                     if journal_categories:
                         journal_categories_df = getEntitiesFromList(journal_categories, "category")
                         additional_objects.append(journal_categories_df)
-                    
+
                     journal_areas = entity.getAreas()
                     if journal_areas:
                         journal_areas_df = getEntitiesFromList(journal_areas, "areas")
                         additional_objects.append(journal_areas_df)
-                
-            elif result_type == "category" or result_type == "categories":
-                category_outputs = [", ".join(entity.getIds()), entity.getQuartile()]
+
+            elif result_type in ("category", "categories"):
+                category_outputs = [
+                    ", ".join(entity.getIds()), 
+                    entity.getQuartile()
+                ]
                 category_columns = ["category", "quartile"]
                 if return_result.empty:
                     return_result = pd.DataFrame([category_outputs], columns=category_columns)
@@ -1118,7 +1131,7 @@ def getEntitiesFromList(entities: list[IdentifiableEntity] | IdentifiableEntity,
                     new_result = pd.Series(category_outputs, index=category_columns)
                     return_result = pd.concat([return_result, new_result.to_frame().T], ignore_index=True)
 
-            elif result_type == "area" or result_type == "areas":
+            elif result_type in ("area", "areas"):
                 area_outputs = [", ".join(entity.getIds())]
                 area_columns = ["area"]
                 if return_result.empty:
@@ -1129,11 +1142,16 @@ def getEntitiesFromList(entities: list[IdentifiableEntity] | IdentifiableEntity,
         else:
             none_results += 1
 
-    if none_results: # here to ensure that if results are removed, it is displayed
+    if none_results:
         print(f"None results: {none_results}")
 
     if additional_objects:
         for additional_object in additional_objects:
             print(additional_object)
+
+    # Forza le colonne (tranne 'seal' e 'apc') a stringa
+    for col in return_result.columns:
+        if col not in ("seal", "apc"):
+            return_result[col] = return_result[col].astype(str)
 
     return return_result
