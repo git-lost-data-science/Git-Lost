@@ -613,22 +613,16 @@ class JournalQueryHandler(QueryHandler):
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
 
-    def getJournalsWithLicense(self, licenses: str | set[str]) -> pd.DataFrame:
+    def getJournalsWithLicense(self, licenses: set[str]) -> pd.DataFrame: # * Rumana, it works
         endpoint = self.getDbPathOrUrl()
-       
-        if isinstance(licenses, str):      #both string and set
-            l_set = {licenses.strip().lower()}
-        else:
-            l_set = {l.strip().lower() for l in licenses}
-
     
-        filters = []   # For partial match, use CONTAINS, for exact match use '='
+        l_set = {l.strip().lower() for l in licenses}
+
+        filters = []
         for license_val in l_set:
-         
-            license_val_escaped = license_val.replace('"', '\\"')   #to escape double quotes
-            filters.append(f'CONTAINS(LCASE(STR(?license)), "{license_val_escaped}")')  # For partial match
-           
-            # filters.append(f'LCASE(STR(?license)) = "{license_val_escaped}"')  # For exact match
+            license_val_escaped = license_val.replace('"', '\\"')
+            filters.append(f'LCASE(STR(?license)) = "{license_val_escaped}"')  # Exact match
+
         filter_clause = " || ".join(filters)
 
         query = f"""
@@ -648,8 +642,8 @@ class JournalQueryHandler(QueryHandler):
         }}
         """
         try:
-            jou_df = sparql_dataframe.get(endpoint, query, True)
-            return jou_df.rename(columns={"id": "journal-ids"})
+            jou_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
+            return jou_df
         except Exception as e:
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
