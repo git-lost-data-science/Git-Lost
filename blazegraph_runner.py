@@ -4,7 +4,7 @@ import sys
 from colorama import Fore
 from getkey import getkey
 
-DEFAULT_BLAZEGRAPH_ARGS = ("java", "-server", "-Xmx4g",  "-jar", "blazegraph.jar")
+DEFAULT_BLAZEGRAPH_ARGS = ("java", "-server", "-Xms4g", "-Xmx8g", "-jar", "blazegraph.jar")
 
 started_event = asyncio.Event()
 
