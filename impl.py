@@ -198,18 +198,11 @@ class JournalUploadHandler(UploadHandler):
             if issn and eissn:
                 combined_ids = f"{issn}, {eissn}"
             elif issn and not eissn:
-                combined_ids = issn
+                combined_ids = str(issn)
             elif eissn and not issn:
-                combined_ids = eissn
+                combined_ids = str(eissn)
             else:
                 combined_ids = ""
-            
-            # current_languages_str = str(row.get("languages", "")).strip() 
-            # if current_languages_str: 
-            #     list_of_languages = [lang.strip() for lang in current_languages_str.split(",")]
-            #     for lang_item in list_of_languages:
-            #         if lang_item: 
-            #             j_graph.add((subj, languages, rdflib.Literal(lang_item)))
         
             j_graph.add((subj, rdflib.RDF.type, Journal))
             j_graph.add((subj, id, rdflib.Literal(combined_ids)))
@@ -740,8 +733,15 @@ class BasicQueryEngine:
             return False # appends the category handlers to the categoryQuery
 
     def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # * Nico, working with journals, areas, and categories
-        if not id: # preventing any errors from results
-            return None
+        if not isinstance(id, str): # another good measure to avoid 'float' Type Errors (hopefully)
+            try:
+                if not id: # preventing any errors from results
+                    return None
+                else:
+                    id = str(id)
+            except Exception as e:
+                print(f"Unexpected error during getEntityById: {e}")
+                return None
 
         journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
 
@@ -759,7 +759,7 @@ class BasicQueryEngine:
                 return None
             
             journal = Journal( 
-                journal_object["journal-ids"], 
+                str(journal_object["journal-ids"]), # force casting in the case of any type errors
                 journal_object["title"], 
                 journal_object["languages"], 
                 journal_object["publisher"], 
@@ -803,50 +803,29 @@ class BasicQueryEngine:
 
             return None # pushed back a line – if it's not in one category query handler, it might be in the next
 
-    def getAllJournals(self) -> list[Journal]: # Ila, tested, working
-        return self._getLimitedJournals(limit=1000)  # limiting the number of the journals for testing purposes 
+    def getAllJournals(self) -> list[Journal]: # * Ila, working but slowly
+        limit = 1000 # ! this is set by us
+        return self._getLimitedJournals(limit)  # limiting the number of the journals for testing purposes 
 
-    def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]:
-        
+    def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]: 
         all_journals = []
-        seen_ids = set()
 
         for journalQueryHandler in self.journalQuery:
             journals_df = journalQueryHandler.getAllJournals()
             if journals_df.empty: # it the columns is empty, ignore it, go on 
                 continue
 
-            for journal_id in journals_df["journal-ids"]:
-                if journal_id in seen_ids:
-                    continue # ignore the journal 
-
-                journal = self.getEntityById(journal_id)
-                if journal is not None:
+            for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal not in all_journals:
                     all_journals.append(journal)
-                    seen_ids.add(journal_id)
 
                 if limit is not None and len(all_journals) >= limit: # if the limit has been reached or ignored, return the list made
                     return all_journals
 
         return all_journals
 
-
-    # def getAllJournals(self) -> list[Journal]: # * Ila, working but slowly
-    #     all_journals = [] 
-
-    #     for journalQueryHandler in self.journalQuery:
-    #         journals_df = journalQueryHandler.getAllJournals()
-    #         if journals_df.empty:
-    #             continue
-
-    #         for journal_ids in journals_df["journal-ids"]: 
-    #             journal = self.getEntityById(journal_ids) 
-    #             if journal not in all_journals:
-    #                 all_journals.append(journal) 
-
-    #     return all_journals
-
-    def getJournalsWithTitle(self, partialTitle: str) ->list[Journal]: # * Martina, working
+    def getJournalsWithTitle(self, partialTitle: str) -> list[Journal]: # * Martina, working
         journals_with_title = []
 
         for journalQueryHandler in self.journalQuery:
@@ -856,7 +835,7 @@ class BasicQueryEngine:
 
             for journal_ids in journals_df["journal-ids"]:
                 journal = self.getEntityById(journal_ids)
-                if journal not in journals_with_title:
+                if journal is not None and journal not in journals_with_title:
                     journals_with_title.append(journal)
 
         return journals_with_title
@@ -871,7 +850,7 @@ class BasicQueryEngine:
 
             for journal_ids in journals_df["journal-ids"]:
                 journal = self.getEntityById(journal_ids)
-                if journal not in journals_published_by:
+                if journal is not None and journal not in journals_published_by:
                     journals_published_by.append(journal)
 
         return journals_published_by
@@ -886,7 +865,7 @@ class BasicQueryEngine:
 
             for journal_ids in journals_df["journal-ids"]:
                 journal = self.getEntityById(journal_ids)
-                if journal not in journals_with_license:
+                if journal is not None and journal not in journals_with_license:
                     journals_with_license.append(journal)
 
         return journals_with_license
@@ -901,7 +880,7 @@ class BasicQueryEngine:
 
             for journal_ids in journals_df["journal-ids"]:
                 journal = self.getEntityById(journal_ids)
-                if journal not in journals_with_APC:
+                if journal is not None and journal not in journals_with_APC:
                     journals_with_APC.append(journal)
 
         return journals_with_APC
@@ -916,7 +895,7 @@ class BasicQueryEngine:
 
             for journal_ids in journals_df["journal-ids"]:
                 journal = self.getEntityById(journal_ids)
-                if journal not in journals_with_DOAJ_seal:
+                if journal is not None and journal not in journals_with_DOAJ_seal:
                     journals_with_DOAJ_seal.append(journal)
 
         return journals_with_DOAJ_seal                         
@@ -931,7 +910,7 @@ class BasicQueryEngine:
 
             for category_id in categories_df["category"]:
                 category = self.getEntityById(category_id)
-                if category not in all_categories:
+                if category is not None and category not in all_categories:
                     all_categories.append(category)
 
         return all_categories
@@ -947,7 +926,7 @@ class BasicQueryEngine:
             for area_id in areas_df["area"]:
                 entity = self.getEntityById(area_id)
                 area = Area(entity.getIds()[0]) if isinstance(entity, Category) else entity # ?? dealing with the Multidisciplinary case (where the area and category have the same name)
-                if area not in all_areas:
+                if area is not None and area not in all_areas:
                     all_areas.append(area)
 
         return all_areas
@@ -962,7 +941,7 @@ class BasicQueryEngine:
 
             for category_id in categories_df["category"]:
                 category = self.getEntityById(category_id)
-                if category not in categories_with_quartiles: # keep as a safety measure in the case that a quartile exists in a separate handler
+                if category is not None and category not in categories_with_quartiles: # keep as a safety measure in the case that a quartile exists in a separate handler
                     categories_with_quartiles.append(category)
 
         return categories_with_quartiles
@@ -982,7 +961,7 @@ class BasicQueryEngine:
             
             for category_id in areas["category"]:
                 category = self.getEntityById(category_id)
-                if category not in assigned_categories:
+                if category is not None and category not in assigned_categories:
                     assigned_categories.append(category)
 
         return assigned_categories
@@ -1002,7 +981,7 @@ class BasicQueryEngine:
             for area_id in categories["area"]:
                 entity = self.getEntityById(area_id)
                 area = Area(entity.getIds()[0]) if isinstance(entity, Category) else entity # ?? dealing with the Multidisciplinary case (where the area and category have the same name)
-                if area not in assigned_areas: # working thanks to the definition of equality in the IdentifiableEntity class
+                if area is not None and area not in assigned_areas: # working thanks to the definition of equality in the IdentifiableEntity class
                     assigned_areas.append(area)
 
         return assigned_areas
