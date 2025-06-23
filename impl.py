@@ -57,9 +57,13 @@ class Journal(IdentifiableEntity):
         if not isinstance(title, str) and not title:
             raise TypeMismatchError("a non-empty str", title) # ? the same as raise TypeError(f"Expected a non-empty str, got {type(title).__name__}")
         
-        if not isinstance(languages, list) and not all(isinstance(lang, str) for lang in languages) and not isinstance(languages, str) and not languages:
+        if not isinstance(languages, (str, list)): # ! Ila changed this
             raise TypeMismatchError("a non-empty str or list", languages)
-        
+        if isinstance(languages, list) and not all(isinstance(lang, str) for lang in languages):
+            raise TypeMismatchError("a list of strings", languages)
+        if not languages: # handles empty string or empty list
+            raise TypeMismatchError("a non-empty str or list", languages)
+                
         if not isinstance(publisher, str) and not publisher:
             raise TypeMismatchError("a str or a NoneType", publisher)
         
@@ -613,22 +617,16 @@ class JournalQueryHandler(QueryHandler):
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
 
-    def getJournalsWithLicense(self, licenses: str | set[str]) -> pd.DataFrame:
+    def getJournalsWithLicense(self, licenses: set[str]) -> pd.DataFrame: # * Rumana, it works
         endpoint = self.getDbPathOrUrl()
-       
-        if isinstance(licenses, str):      #both string and set
-            l_set = {licenses.strip().lower()}
-        else:
-            l_set = {l.strip().lower() for l in licenses}
-
     
-        filters = []   # For partial match, use CONTAINS, for exact match use '='
+        l_set = {l.strip().lower() for l in licenses}
+
+        filters = []
         for license_val in l_set:
-         
-            license_val_escaped = license_val.replace('"', '\\"')   #to escape double quotes
-            filters.append(f'CONTAINS(LCASE(STR(?license)), "{license_val_escaped}")')  # For partial match
-           
-            # filters.append(f'LCASE(STR(?license)) = "{license_val_escaped}"')  # For exact match
+            license_val_escaped = license_val.replace('"', '\\"')
+            filters.append(f'LCASE(STR(?license)) = "{license_val_escaped}"')  # Exact match
+
         filter_clause = " || ".join(filters)
 
         query = f"""
@@ -648,12 +646,12 @@ class JournalQueryHandler(QueryHandler):
         }}
         """
         try:
-            jou_df = sparql_dataframe.get(endpoint, query, True)
-            return jou_df.rename(columns={"id": "journal-ids"})
+            jou_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
+            return jou_df
         except Exception as e:
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
-         
+
     def getJournalsWithAPC(self): # * Martina, working
         endpoint = self.getDbPathOrUrl()
         jouAPC_query = """
@@ -804,7 +802,7 @@ class BasicQueryEngine:
             return None # pushed back a line – if it's not in one category query handler, it might be in the next
 
     def getAllJournals(self) -> list[Journal]: # Ila, tested, working
-        return self._getLimitedJournals(limit=500)  # limiting the number of the journals for testing purposes 
+        return self._getLimitedJournals(limit=100)  # limiting the number of the journals for testing purposes 
 
     def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]:
         
@@ -886,7 +884,7 @@ class BasicQueryEngine:
 
             for journal_ids in journals_df["journal-ids"]:
                 journal = self.getEntityById(journal_ids)
-                if journal not in journals_with_license:
+                if journal is not None and journal not in journals_with_license:
                     journals_with_license.append(journal)
 
         return journals_with_license
@@ -901,7 +899,7 @@ class BasicQueryEngine:
 
             for journal_ids in journals_df["journal-ids"]:
                 journal = self.getEntityById(journal_ids)
-                if journal not in journals_with_APC:
+                if journal is not None and journal not in journals_with_APC:
                     journals_with_APC.append(journal)
 
         return journals_with_APC
@@ -916,7 +914,7 @@ class BasicQueryEngine:
 
             for journal_ids in journals_df["journal-ids"]:
                 journal = self.getEntityById(journal_ids)
-                if journal not in journals_with_DOAJ_seal:
+                if journal is not None and journal not in journals_with_DOAJ_seal:
                     journals_with_DOAJ_seal.append(journal)
 
         return journals_with_DOAJ_seal                         
@@ -931,7 +929,7 @@ class BasicQueryEngine:
 
             for category_id in categories_df["category"]:
                 category = self.getEntityById(category_id)
-                if category not in all_categories:
+                if category is not None and category not in all_categories:
                     all_categories.append(category)
 
         return all_categories
@@ -1011,7 +1009,7 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
     def __init__(self):
         super().__init__()
 
-    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str] = None) -> list[Journal]: # ?? Nico, requires testing once other methods work
+    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str] = None) -> list[Journal]: # * Nico, works
         target_categories = []
         journals_in_categories = []
 
@@ -1032,21 +1030,37 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
                     journals_in_categories.append(journal)
 
         return journals_in_categories
-
-    def getJournalsInAreasWithLicense(self, areas_ids:set[str], licenses: set[str]) -> list[Journal]: # ?? Ila, requires testing once other methods work
-
-        target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids] # getting all the areas 
-        jou_with_license= self.getJournalsWithLicense(licenses)
+    
+    def getJournalsInAreasWithLicense(self, areas_ids: set[str], licenses: set[str]) -> list[Journal]: # Ila 
         result = []
+        
+        if not areas_ids:
+            target_areas = self.getAllAreas()
+        else:
+            target_areas = [self.getEntityById(area_id) for area_id in areas_ids]
+            target_areas = [area for area in target_areas if area is not None]
+            target_areas = [Area(entity.getIds()[0]) if isinstance(entity, Category) else entity for entity in target_areas]
+            target_areas = [area for area in target_areas if isinstance(area, Area)]
 
-        for jou in jou_with_license: # for every journal in the journals with the specified licenses 
-            jou_areas= jou.getAreas # get the areas of that journal 
-            for area in jou_areas: # for every area in the areas of the current journal
-                if area in target_areas: # if the area is in the targeted areas, append the journal 
+        if not target_areas:
+            return []
+
+        jou_with_license = self.getJournalsWithLicense(licenses)
+
+        for jou in jou_with_license:
+            if jou is None:
+                continue
+
+            journal_areas = jou.getAreas()
+            
+            for area in journal_areas:
+                if area in target_areas:
                     result.append(jou)
+                    break
+        
         return result
         
-    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # ?? Ila, Marti & Nico requires testing once other methods work
+    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Ila, Marti & Nico, works
         diamond_journals = []
         all_journals = self.getAllJournals()
 
@@ -1149,7 +1163,7 @@ def getEntitiesFromList(
         for additional_object in additional_objects:
             print(additional_object)
 
-    # Forza le colonne (tranne 'seal' e 'apc') a stringa
+    # ! Ila: makes sure that the result is str, not other types 
     for col in return_result.columns:
         if col not in ("seal", "apc"):
             return_result[col] = return_result[col].astype(str)
