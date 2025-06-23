@@ -613,16 +613,22 @@ class JournalQueryHandler(QueryHandler):
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
 
-    def getJournalsWithLicense(self, licenses: set[str]) -> pd.DataFrame: # * Rumana, it works
+    def getJournalsWithLicense(self, licenses: str | set[str]) -> pd.DataFrame:
         endpoint = self.getDbPathOrUrl()
+       
+        if isinstance(licenses, str):      #both string and set
+            l_set = {licenses.strip().lower()}
+        else:
+            l_set = {l.strip().lower() for l in licenses}
+
     
-        l_set = {l.strip().lower() for l in licenses}
-
-        filters = []
+        filters = []   # For partial match, use CONTAINS, for exact match use '='
         for license_val in l_set:
-            license_val_escaped = license_val.replace('"', '\\"')
-            filters.append(f'LCASE(STR(?license)) = "{license_val_escaped}"')  # Exact match
-
+         
+            license_val_escaped = license_val.replace('"', '\\"')   #to escape double quotes
+            filters.append(f'CONTAINS(LCASE(STR(?license)), "{license_val_escaped}")')  # For partial match
+           
+            # filters.append(f'LCASE(STR(?license)) = "{license_val_escaped}"')  # For exact match
         filter_clause = " || ".join(filters)
 
         query = f"""
@@ -642,8 +648,8 @@ class JournalQueryHandler(QueryHandler):
         }}
         """
         try:
-            jou_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
-            return jou_df
+            jou_df = sparql_dataframe.get(endpoint, query, True)
+            return jou_df.rename(columns={"id": "journal-ids"})
         except Exception as e:
             self.unexpectedDatabaseError(e)
             return pd.DataFrame()
@@ -798,7 +804,7 @@ class BasicQueryEngine:
             return None # pushed back a line – if it's not in one category query handler, it might be in the next
 
     def getAllJournals(self) -> list[Journal]: # Ila, tested, working
-        return self._getLimitedJournals(limit=100)  # limiting the number of the journals for testing purposes 
+        return self._getLimitedJournals(limit=1000)  # limiting the number of the journals for testing purposes 
 
     def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]:
         
@@ -870,7 +876,7 @@ class BasicQueryEngine:
 
         return journals_published_by
 
-    def getJournalsWithLicense(self, licenses: str) -> list[Journal]: # ?? Rumana, fix the issue in the JournalQueryHandler to fix this function
+    def getJournalsWithLicense(self, licenses: set[str]) -> list[Journal]: # ?? Rumana, fix the issue in the JournalQueryHandler to fix this function
         journals_with_license = []
 
         for journalQueryHandler in self.journalQuery: 
@@ -946,7 +952,7 @@ class BasicQueryEngine:
 
         return all_areas
                 
-    def getCategoriesWithQuartile(self, quartiles: Optional[set[str]]) -> list[Category]: # * Ila, working
+    def getCategoriesWithQuartile(self, quartiles: set[str] = None) -> list[Category]: # * Ila, working
         categories_with_quartiles = [] # no need to worry about the no quartiles specified case
 
         for categoryQueryHandler in self.categoryQuery:
@@ -1005,38 +1011,38 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
     def __init__(self):
         super().__init__()
 
-    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str] = None) -> list[Journal]: # * Nico, works
-        target_categories = []
+    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Nico, works
+        target_categories = self.getAllCategories() if not category_ids else [self.getEntityById(category) for category in category_ids]
         journals_in_categories = []
-
-        if category_ids: # no duplicates are possible given that category_ids is a set
-            for category_id in category_ids: 
-                category = self.getEntityById(category_id)
-                target_categories.append(category) # only a list with VERY specific categories
-        else:
-            target_categories = self.getAllCategories() # if unspecified, all categories are assumed
         
         journals = self.getAllJournals()
 
         for journal in journals:
-            journal_categories = journal.getCategories() # this is why we have getter methods!!!
+            journal_categories = journal.getCategories() 
             for journal_category in journal_categories:
                 journal_category_quartile = journal_category.getQuartile()
-                if journal_category in target_categories and (not quartiles or journal_category_quartile in quartiles): # adding not quartiles in case no quartiles are specified
+                matching_categories = journal_category in target_categories
+                matching_quartiles = not quartiles or journal_category_quartile in quartiles
+                if journal not in journals_in_categories and matching_categories and matching_quartiles: 
                     journals_in_categories.append(journal)
+                    break
 
         return journals_in_categories
-
-    def getJournalsInAreasWithLicense(self, areas_ids: set[str], licenses: set[str]) -> list[Journal]: # ! Ila: I need to fix this 
+    
+    def getJournalsInAreasWithLicense(self, areas_ids: set[str], licenses: set[str]) -> list[Journal]: # * Ila, works
         target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids]
-        jou_with_license = self.getJournalsWithLicense(licenses)
-        result = []
+        journals_with_licenses = []
+        
+        journals = self.getJournalsWithLicense(licenses)
 
-        for jou in jou_with_license:
-            if any(area in target_areas for area in jou.getAreas()):
-                result.append(jou)
-                continue 
-        return result
+        for journal in journals:
+            journal_areas = journal.getAreas() 
+            for journal_area in journal_areas:
+                if journal not in journals_with_licenses and journal_area in target_areas: 
+                    journals_with_licenses.append(journal)
+                    break
+
+        return journals_with_licenses
         
     def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Ila, Marti & Nico, works
         diamond_journals = []
