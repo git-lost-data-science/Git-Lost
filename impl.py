@@ -1058,7 +1058,8 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
             for journal_category in journal_categories:
                 journal_category_quartile = journal_category.getQuartile()
                 if journal_category in target_categories and (not quartiles or journal_category_quartile in quartiles): # adding not quartiles in case no quartiles are specified
-                    journals_in_categories.append(journal)
+                    if journal not in journals_in_categories: # ! Ila added this 
+                        journals_in_categories.append(journal)
 
         return journals_in_categories
 
@@ -1071,8 +1072,9 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
                 if jou is not None: # for every journal in the journals with the specified licenses 
                     jou_areas= jou.getAreas() # get the areas of that journal 
                     for area in jou_areas: # for every area in the areas of the current journal
-                        if area and area in target_areas: # if the area is in the targeted areas, append the journal 
-                            result.append(jou)
+                        if area and area in target_areas:
+                            if jou not in result: # if the area is in the targeted areas, append the journal 
+                                result.append(jou)
         return result
     
     def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Ila, Marti & Nico, works
