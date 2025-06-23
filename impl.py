@@ -826,7 +826,7 @@ class BasicQueryEngine:
             return None # pushed back a line – if it's not in one category query handler, it might be in the next
 
     def getAllJournals(self) -> list[Journal]: # Ila, tested, working
-        return self._getLimitedJournals(limit=1000)  # limiting the number of the journals for testing purposes 
+        return self._getLimitedJournals(limit=500)  # limiting the number of the journals for testing purposes 
 
     def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]:
         all_journals = []
@@ -1039,44 +1039,39 @@ class FullQueryEngine(BasicQueryEngine): # all the methods return a list of Jour
     def __init__(self):
         super().__init__()
 
-    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str] = None) -> list[Journal]: # ?? Nico, requires testing once other methods work
-        target_categories = []
+    def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Nico, works
+        target_categories = self.getAllCategories() if not category_ids else [self.getEntityById(category) for category in category_ids]
         journals_in_categories = []
-
-        if category_ids: # no duplicates are possible given that category_ids is a set
-            for category_id in category_ids: 
-                category = self.getEntityById(category_id)
-                target_categories.append(category) # only a list with VERY specific categories
-        else:
-            target_categories = self.getAllCategories() # if unspecified, all categories are assumed
         
         journals = self.getAllJournals()
 
         for journal in journals:
-            journal.id = str(journal.id)    # Marti: added
-            journal_categories = journal.getCategories() # this is why we have getter methods!!!
-            for journal_category in journal_categories:
-                journal_category_quartile = journal_category.getQuartile()
-                if journal_category in target_categories and (not quartiles or journal_category_quartile in quartiles): # adding not quartiles in case no quartiles are specified
-                    if journal not in journals_in_categories: # ! Ila added this 
+            if journal is not None:
+                journal_categories = journal.getCategories() 
+                for journal_category in journal_categories:
+                    journal_category_quartile = journal_category.getQuartile()
+                    matching_categories = journal_category in target_categories
+                    matching_quartiles = not quartiles or journal_category_quartile in quartiles
+                    if journal not in journals_in_categories and matching_categories and matching_quartiles: 
                         journals_in_categories.append(journal)
-
+                        break
         return journals_in_categories
-
-    def getJournalsInAreasWithLicense(self, areas_ids:set[str], licenses: set[str]) -> list[Journal]: # ?? Ila, requires testing once other methods work
-        target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids] # getting all the areas 
-        jou_with_license= self.getJournalsWithLicense(licenses)
-        result = []
-
-        for jou in jou_with_license:
-                if jou is not None: # for every journal in the journals with the specified licenses 
-                    jou_areas= jou.getAreas() # get the areas of that journal 
-                    for area in jou_areas: # for every area in the areas of the current journal
-                        if area and area in target_areas:
-                            if jou not in result: # if the area is in the targeted areas, append the journal 
-                                result.append(jou)
-        return result
     
+    def getJournalsInAreasWithLicense(self, areas_ids: set[str], licenses: set[str]) -> list[Journal]: # * Ila, works
+        target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids]
+        journals_with_licenses = []
+        
+        journals = self.getJournalsWithLicense(licenses)
+
+        for journal in journals:
+            journal_areas = journal.getAreas() 
+            for journal_area in journal_areas:
+                if journal not in journals_with_licenses and journal_area in target_areas: 
+                    journals_with_licenses.append(journal)
+                    break
+
+        return journals_with_licenses
+        
     def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Ila, Marti & Nico, works
         diamond_journals = []
         all_journals = self.getAllJournals()
@@ -1189,8 +1184,5 @@ def getEntitiesFromList(entities: list[IdentifiableEntity] | IdentifiableEntity,
     if additional_objects:
         for additional_object in additional_objects:
             print(additional_object)
-        # ! Ila: makes sure that the result is str, not other types 
-    for col in return_result.columns:
-        if col not in ("seal", "apc"):
-            return_result[col] = return_result[col].astype(str)
+
     return return_result
