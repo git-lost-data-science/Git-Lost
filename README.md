@@ -2,14 +2,14 @@
 **Hello! This is a project for our [Data Science Exam](https://github.com/comp-data/2024-2025).**
 # 📊 Data Science Project
 
-This project aims to develop a software to process data stored in different formats (CSV and JSON) and upload them into two distinct databases (a graph database and a relational database). The software also provides tools to query both databases simultaneously through predefined operations.
+This project aims to develop a software to process data stored in different formats (CSV and JSON) and upload them into two distinct databases (a graph database and a relational database). The software also provides tools to query both databases simultaneously through predefined operations, with SPARQL and SQL. 
 
 ---
 
 ## 📁 Data
 
-We provide exemplar data to test the project:
-- [`data/doaj.csv`](data/doaj.csv): metadata about journals from the [Directory of Open Access Journals (DOAJ)](https://doaj.org). Note: multiple languages of the same journal are stored in a single string separated by `, `.
+Data we used to test the project:
+- [`data/doaj.csv`](data/doaj.csv): metadata about journals from the [Directory of Open Access Journals (DOAJ)](https://doaj.org).
 - [`data/scimago.json`](data/scimago.json): data from [Scimago Journal Rank](https://www.scimagojr.com), including identifiers (ISSNs), categories, and areas.
 
 > ⚠️ Any custom CSV/JSON file used must respect the same structure as these exemplars.
@@ -25,8 +25,6 @@ We provide exemplar data to test the project:
 ## 🧩 Data Model
 
 ![Data model](img/datamodel.png)
-
-All classes must implement the *get* and *has* methods as shown in the UML diagrams. Additional methods are allowed, but constructors and methods listed below are mandatory.
 
 ---
 
@@ -51,8 +49,8 @@ All classes must implement the *get* and *has* methods as shown in the UML diagr
 
 Subclasses implement specific logic:
 
-- `JournalUploadHandler`: handles CSV data → graph database
-- `CategoryUploadHandler`: handles JSON data → relational database
+- `JournalUploadHandler`: handles CSV data → graph database (Blazegraph)
+- `CategoryUploadHandler`: handles JSON data → relational database (SQLite)
 
 ---
 
