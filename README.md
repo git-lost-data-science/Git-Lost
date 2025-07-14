@@ -25,10 +25,13 @@ Data we used to test the project:
 ## 🧩 Data Model
 
 ![Data model](img/datamodel.png)
+![UML diagram](img/datamodel-uml.png)
 
 ---
 
 ## 📦 Classes
+
+![Classes' UML](img/classes-uml.png)
 
 ### Handler
 | Attribute          | Description                                                       |
@@ -162,7 +165,7 @@ engine.addJournalHandler(jou_qh)
 journals = engine.getJournalsInCategoriesWithQuartile(["Oncology"], ["Q1"])
 print(journals)
 ```
-## The Git-Lost Team 
+## 🤍 The Git-Lost Team 
 
 ☺ [Rumana](https://github.com/rumana-mh) <br/>
 ✦ [Nico](https://github.com/nichothenacho64) <br/>
