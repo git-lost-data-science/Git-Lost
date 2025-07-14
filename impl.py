@@ -1,3 +1,4 @@
+# java -server -Xmx1g -jar blazegraph.jarjava -server -Xmx1g -jar blazegraph.jar
 import json
 import os
 import re
@@ -813,10 +814,6 @@ class BasicQueryEngine:
 
     def getAllJournals(self) -> list[Journal]: # * Ila
         # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
-        limit = None 
-        return self._getLimitedJournals(limit)  # limiting the number of the journals for testing purposes 
-
-    def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]: 
         all_journals = []
 
         for journalQueryHandler in self.journalQuery:
@@ -828,10 +825,6 @@ class BasicQueryEngine:
                 journal = self.getEntityById(journal_ids)
                 if journal not in all_journals:
                     all_journals.append(journal)
-
-                if limit is not None and len(all_journals) >= limit: # if the limit has been reached or ignored, return the list made
-                    return all_journals
-
         return all_journals
 
     def getJournalsWithTitle(self, partialTitle: str) -> list[Journal]: # * Martina
@@ -1060,25 +1053,111 @@ class FullQueryEngine(BasicQueryEngine):
         target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids] 
         target_categories = self.getAllCategories() if not category_ids else [self.getEntityById(category) for category in category_ids]
         
-        if not quartiles:
+        if not quartiles: # has it been handled this case previously by Nico? 
             target_quartiles = None
         elif not quartiles.issubset({"Q1", "Q2", "Q3", "Q4"}): 
             target_quartiles = None
         else:
             target_quartiles = quartiles
 
-        target_areas = list(filter(None, target_areas))
+        target_areas = list(filter(None, target_areas)) 
         target_categories = list(filter(None, target_categories))
 
-        for journal in filter(lambda journal: not journal.hasAPC(), all_journals):
-            if any(area in target_areas for area in journal.getAreas()): 
-                diamond_journals.append(journal)
-                continue 
+        for journal in filter(lambda journal: not journal.hasAPC(), all_journals): # matching categories + quartiles AND area(s)
+            if any(area in target_areas for area in journal.getAreas()):
+                for category in filter(lambda category: category in target_categories, journal.getCategories()):
+                    if target_quartiles is None or category.getQuartile() in target_quartiles:
+                        diamond_journals.append(journal)
+                        break 
 
-            for category in filter(lambda category: category in target_categories, journal.getCategories()): 
-                if target_quartiles is None or category.getQuartile() in target_quartiles:
-                    diamond_journals.append(journal)
-                    break  
+        return set(diamond_journals) # per sicurezza 
+    
 
-        return diamond_journals
+# ! for testing purposes 
+def getEntitiesFromList(
+    entities: list[IdentifiableEntity] | IdentifiableEntity,
+    result_type: str,
+    associated_journal_objects: bool = False
+) -> pd.DataFrame:
 
+    if isinstance(entities, IdentifiableEntity):
+        entities = [entities]
+
+    return_result = pd.DataFrame()
+    none_results = 0
+    additional_objects = []
+
+    for entity in entities:
+        if entity is not None:
+            if result_type in ("journal", "journals"):
+                journal_outputs = [
+                    ", ".join(entity.getIds()), 
+                    entity.getTitle(), 
+                    ", ".join(entity.getLanguages()), 
+                    entity.getPublisher(), 
+                    entity.hasDOAJSeal(), 
+                    entity.getLicense(), 
+                    entity.hasAPC()
+                ]
+                journal_columns = [
+                    "journal-ids", 
+                    "title", 
+                    "languages", 
+                    "publisher", 
+                    "seal", 
+                    "license", 
+                    "apc"
+                ]
+                if return_result.empty:
+                    return_result = pd.DataFrame([journal_outputs], columns=journal_columns)
+                else:
+                    new_result = pd.Series(journal_outputs, index=journal_columns)
+                    return_result = pd.concat([return_result, new_result.to_frame().T], ignore_index=True)
+
+                if associated_journal_objects:
+                    journal_categories = entity.getCategories()
+                    if journal_categories:
+                        journal_categories_df = getEntitiesFromList(journal_categories, "category")
+                        additional_objects.append(journal_categories_df)
+
+                    journal_areas = entity.getAreas()
+                    if journal_areas:
+                        journal_areas_df = getEntitiesFromList(journal_areas, "areas")
+                        additional_objects.append(journal_areas_df)
+
+            elif result_type in ("category", "categories"):
+                category_outputs = [
+                    ", ".join(entity.getIds()), 
+                    entity.getQuartile()
+                ]
+                category_columns = ["category", "quartile"]
+                if return_result.empty:
+                    return_result = pd.DataFrame([category_outputs], columns=category_columns)
+                else:
+                    new_result = pd.Series(category_outputs, index=category_columns)
+                    return_result = pd.concat([return_result, new_result.to_frame().T], ignore_index=True)
+
+            elif result_type in ("area", "areas"):
+                area_outputs = [", ".join(entity.getIds())]
+                area_columns = ["area"]
+                if return_result.empty:
+                    return_result = pd.DataFrame([area_outputs], columns=area_columns)
+                else:
+                    new_result = pd.Series(area_outputs, index=area_columns)
+                    return_result = pd.concat([return_result, new_result.to_frame().T], ignore_index=True)
+        else:
+            none_results += 1
+
+    if none_results:
+        print(f"None results: {none_results}")
+
+    if additional_objects:
+        for additional_object in additional_objects:
+            print(additional_object)
+
+    # ! Ila: makes sure that the result is str, not other types 
+    for col in return_result.columns:
+        if col not in ("seal", "apc"):
+            return_result[col] = return_result[col].astype(str)
+
+    return return_result
