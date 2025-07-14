@@ -23,7 +23,6 @@ Data we used to test the project:
 
 ## 🧩 Data Model
 
-![Data model](img/datamodel.png)
 ![UML diagram](img/datamodel-uml.png)
 
 ---
