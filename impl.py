@@ -67,8 +67,6 @@ class Journal(IdentifiableEntity):
                  seal: bool, license: str, apc: bool):
         super().__init__(id)
         
-       
-
         if not isinstance(title, str) and not title:
             raise TypeMismatchError("a non-empty str", title) 
         
@@ -222,7 +220,7 @@ class JournalUploadHandler(UploadHandler):
             j_graph.add((subj, rdflib.RDF.type, Journal))
             j_graph.add((subj, id, rdflib.Literal(combined_ids)))
             j_graph.add((subj, title, rdflib.Literal(row["title"])))
-            j_graph.add((subj, languages, rdflib.Literal(row["languages"])))
+            j_graph.add((subj, languages, rdflib.Literal(row["languages"])))            
             j_graph.add((subj, publisher, rdflib.Literal(row["publisher"])))
             j_graph.add((subj, seal, rdflib.Literal(row["seal"])))    
             j_graph.add((subj, license, rdflib.Literal(row["license"])))
@@ -518,22 +516,29 @@ class JournalQueryHandler(QueryHandler):
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX schema: <https://schema.org/>
 
-        SELECT ?id ?title ?languages ?publisher ?seal ?license ?apc
+        SELECT ?id ?title ?publisher ?seal ?license ?apc (GROUP_CONCAT(DISTINCT STR(?language); separator=", ") AS ?languages)
         WHERE {{ 
             ?s rdf:type schema:Periodical .
-            ?s schema:identifier ?id . 
-            ?s schema:name ?title . 
-            ?s schema:inLanguage ?languages .
+            ?s schema:identifier ?id .
+            ?s schema:name ?title .
             ?s schema:publisher ?publisher .
             ?s schema:hasDOAJSeal ?seal .
             ?s schema:license ?license .
             ?s schema:hasAPC ?apc .
-        
+            ?s schema:inLanguage ?language .
+
             FILTER CONTAINS(LCASE(STR(?id)), LCASE("{id}"))
-        }} 
+        }}
+        GROUP BY ?id ?title ?publisher ?seal ?license ?apc
         """
         try:
             titles_df = sparql_dataframe.get(endpoint, query, True).rename(columns={"id": "journal-ids"})
+            
+            if not titles_df.empty and "languages" in titles_df.columns: # dropping duplicates
+                titles_df["languages"] = titles_df["languages"].apply(
+                    lambda langs: ", ".join(dict.fromkeys(langs.split(", "))) if isinstance(langs, str) else langs
+                )
+            
             return titles_df
         except Exception as e:
             self.unexpectedDatabaseError(e)
@@ -740,11 +745,11 @@ class BasicQueryEngine:
         except Exception as e:
             print(f"Error loading methods due to the following: {e}")
             return False 
-
-    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]: # * Nico
+        
+    def getEntityById(self, id: str) -> Optional[IdentifiableEntity]:  # * Nico
         if not isinstance(id, str): 
             try:
-                if not id: # preventing any errors from results
+                if not id: 
                     return None
                 else:
                     id = str(id)
@@ -752,28 +757,38 @@ class BasicQueryEngine:
                 print(f"Unexpected error during getEntityById: {e}")
                 return None
 
-        journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(, \d{4}-\d{3,4}X?)*$')
+        journal_id_pattern = re.compile(r'^\d{4}-\d{3,4}X?(\s*,\s*\d{4}-\d{3,4}X?)*$')
 
-        if journal_id_pattern.match(id) is not None: # when it is a journal
+        if journal_id_pattern.match(id) is not None:  
             journal_found = False
 
             for journalQueryHandler in self.journalQuery:
                 journal_object = journalQueryHandler.getById(id)
+                
+                if journal_object.empty:
+                    
+                    journal_object = journalQueryHandler.data[
+                        journalQueryHandler.data["journal-ids"].str.contains(id, regex=False, na=False)
+                    ]
+                
                 if not journal_object.empty:
                     journal_found = True
                     journal_object = journal_object.iloc[0]
-                    break # proceed, the object has been found...
+                    break
 
             if not journal_found:
                 return None
             
-            journal = Journal( 
-                str(journal_object["journal-ids"]), # force casting in the case of any type errors
-                journal_object["title"], 
-                journal_object["languages"], 
-                journal_object["publisher"], 
-                bool(journal_object["seal"]), 
-                journal_object["license"], 
+            ids_list = [id_.strip() for id_ in journal_object["journal-ids"].split(",")]
+            languages_list = [lang.strip() for lang in journal_object["languages"].split(",")]
+
+            journal = Journal(
+                ids_list,
+                journal_object["title"],
+                languages_list,
+                journal_object["publisher"],
+                bool(journal_object["seal"]),
+                journal_object["license"],
                 bool(journal_object["apc"])
             )
 
@@ -786,12 +801,12 @@ class BasicQueryEngine:
                     journal_category_data = journal_category_data.iloc[0]
                     break
 
-            if matching_category_data_found: # categories and areas are ONLY added if there is matching category data found
+            if matching_category_data_found:
                 categories_with_quartiles = journal_category_data["categories-with-quartiles"]
                 area_values = journal_category_data["areas"]
 
                 for category_value, quartile_value in categories_with_quartiles.items():
-                    category = Category(category_value, quartile_value) # each category is now created with only ONE quartile each
+                    category = Category(category_value, quartile_value)
                     journal.addCategory(category)
 
                 for area_value in area_values:
@@ -803,14 +818,17 @@ class BasicQueryEngine:
         else:
             for categoryQueryHandler in self.categoryQuery:
                 category_object = categoryQueryHandler.getById(id)
-                if "category" in category_object.columns and not category_object["category"].isnull().all(): 
+                
+                if "category" in category_object.columns and not category_object["category"].isnull().all():
                     category = category_object.iloc[0]
                     return Category(category["category"], category["quartile"])
+                
                 if "area" in category_object.columns and not category_object["area"].isnull().all():
                     area = category_object.iloc[0]
                     return Area(area["area"])
 
-            return None 
+            return None
+
 
     def getAllJournals(self) -> list[Journal]: # * Ila
         # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
@@ -822,6 +840,36 @@ class BasicQueryEngine:
                 continue
 
             for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal not in all_journals:
+                    all_journals.append(journal)
+        return all_journals
+
+    def getJournalsWithTitle(self, partialTitle: str) -> list[Journal]: # * Martina
+        journals_with_title = []
+
+        for journalQueryHandler in self.journalQuery:
+            journals_df = journalQueryHandler.getJournalsWithTitle(partialTitle)
+            if journals_df.empty:   
+                continue
+
+            for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal is not None and journal not in journals_with_title:
+                    journals_with_title.append(journal)
+
+        return journals_with_title
+
+    def getAllJournals(self) -> list[Journal]: # * Ila
+        # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
+        all_journals = []
+
+        for journalQueryHandler in self.journalQuery:
+            journals_df = journalQueryHandler.getAllJournals()
+            if journals_df.empty: # it the columns is empty, ignore it, go on 
+                continue
+
+            for journal_ids in journals_df["journal-ids"]: # the journal-ids is a str for sure
                 journal = self.getEntityById(journal_ids)
                 if journal not in all_journals:
                     all_journals.append(journal)
@@ -995,10 +1043,11 @@ class FullQueryEngine(BasicQueryEngine):
         super().__init__()
 
     def getJournalsInCategoriesWithQuartile(self, category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Nico
+        # ! The overall amount of journals returned is less (of a few units) than the one expected.
         journals_in_categories = []
 
         target_categories = self.getAllCategories() if not category_ids else [self.getEntityById(category) for category in category_ids]
-        target_categories = list(filter(None, target_categories))
+        target_categories = list(filter(None, target_categories)) 
 
         if not quartiles:
             target_quartiles = None
@@ -1046,6 +1095,8 @@ class FullQueryEngine(BasicQueryEngine):
         return journals_with_licenses
         
     def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Ila, Marti & Nico
+        # ! The overall amount of journals returned is greater (by several units) than the one expected.
+        
         diamond_journals = []
 
         all_journals = self.getAllJournals()
@@ -1157,7 +1208,7 @@ def getEntitiesFromList(
 
     # ! Ila: makes sure that the result is str, not other types 
     for col in return_result.columns:
-        if col not in ("seal", "apc"):
+        if col not in ("journal-ids", "seal", "apc"):
             return_result[col] = return_result[col].astype(str)
 
     return return_result
