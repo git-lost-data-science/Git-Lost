@@ -1,5 +1,5 @@
 <p align="center">
-<img src="img/git-lost.png" alt="Git-lost-logo" width="100"/> 
+<img src="img/git-lost.png" alt="Git-lost-logo" width="300"/> 
 </p>
 # Git Lost
 **Hello! This is a project for our [Data Science Exam](https://github.com/comp-data/2024-2025).**
