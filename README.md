@@ -1,4 +1,7 @@
-# ![Git Lost](img/git-lost.png)
+<p align="center">
+<img src="img/git-lost.png" alt="Git-lost-logo" width="100"/> 
+</p>
+# Git Lost
 **Hello! This is a project for our [Data Science Exam](https://github.com/comp-data/2024-2025).**
 
 We developed a software that processes data stored in different formats (CSV and JSON) and uploads them into two distinct databases (a graph database and a relational database). The software also provides tools to query both databases simultaneously through predefined operations, with SPARQL and SQL. 
