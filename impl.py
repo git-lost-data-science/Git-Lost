@@ -793,6 +793,7 @@ class BasicQueryEngine:
             )
 
             matching_category_data_found = False
+            journal_category_data = ""
 
             for categoryQueryHandler in self.categoryQuery:
                 journal_category_data = categoryQueryHandler.getById(id)
@@ -829,37 +830,6 @@ class BasicQueryEngine:
 
             return None
 
-
-    def getAllJournals(self) -> list[Journal]: # * Ila
-        # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
-        all_journals = []
-
-        for journalQueryHandler in self.journalQuery:
-            journals_df = journalQueryHandler.getAllJournals()
-            if journals_df.empty: # it the columns is empty, ignore it, go on 
-                continue
-
-            for journal_ids in journals_df["journal-ids"]:
-                journal = self.getEntityById(journal_ids)
-                if journal not in all_journals:
-                    all_journals.append(journal)
-        return all_journals
-
-    def getJournalsWithTitle(self, partialTitle: str) -> list[Journal]: # * Martina
-        journals_with_title = []
-
-        for journalQueryHandler in self.journalQuery:
-            journals_df = journalQueryHandler.getJournalsWithTitle(partialTitle)
-            if journals_df.empty:   
-                continue
-
-            for journal_ids in journals_df["journal-ids"]:
-                journal = self.getEntityById(journal_ids)
-                if journal is not None and journal not in journals_with_title:
-                    journals_with_title.append(journal)
-
-        return journals_with_title
-
     def getAllJournals(self) -> list[Journal]: # * Ila
         # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
         all_journals = []
@@ -874,6 +844,29 @@ class BasicQueryEngine:
                 if journal not in all_journals:
                     all_journals.append(journal)
         return all_journals
+    
+    """def getAllJournals(self) -> list[Journal]: # * Ila
+        # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
+        limit = 1000 
+        return self._getLimitedJournals(limit)  # limiting the number of the journals for testing purposes 
+
+    def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]: 
+        all_journals = []
+
+        for journalQueryHandler in self.journalQuery:
+            journals_df = journalQueryHandler.getAllJournals()
+            if journals_df.empty: # it the columns is empty, ignore it, go on 
+                continue
+
+            for journal_ids in journals_df["journal-ids"]:
+                journal = self.getEntityById(journal_ids)
+                if journal not in all_journals:
+                    all_journals.append(journal)
+
+                if limit is not None and len(all_journals) >= limit: # if the limit has been reached or ignored, return the list made
+                    return all_journals
+
+        return all_journals"""
 
     def getJournalsWithTitle(self, partialTitle: str) -> list[Journal]: # * Martina
         journals_with_title = []
@@ -1049,27 +1042,29 @@ class FullQueryEngine(BasicQueryEngine):
         target_categories = self.getAllCategories() if not category_ids else [self.getEntityById(category) for category in category_ids]
         target_categories = list(filter(None, target_categories)) 
 
-        if not quartiles:
+        if not quartiles or quartiles == {"Q1", "Q2", "Q3", "Q4"}:
             target_quartiles = None
         elif not quartiles.issubset({"Q1", "Q2", "Q3", "Q4"}): 
             target_quartiles = None
         else:
             target_quartiles = quartiles
-        
-        journals = self.getAllJournals()
 
-        for journal in journals:
-            journal_categories = journal.getCategories() 
+        for journal in self.getAllJournals():
+            journal_categories = journal.getCategories()
             if journal_categories is None:
                 continue
 
+            valid_journal = False 
             for journal_category in journal_categories:
                 journal_category_quartile = journal_category.getQuartile()
                 matching_categories = journal_category in target_categories
                 matching_quartiles = not target_quartiles or journal_category_quartile in target_quartiles
-                if journal not in journals_in_categories and matching_categories and matching_quartiles: 
-                    journals_in_categories.append(journal)
+                if matching_categories and matching_quartiles:
+                    valid_journal = True 
                     break
+
+            if valid_journal and journal not in journals_in_categories: 
+                journals_in_categories.append(journal)
 
         return journals_in_categories
     
@@ -1094,17 +1089,13 @@ class FullQueryEngine(BasicQueryEngine):
 
         return journals_with_licenses
         
-    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]: # * Ila, Marti & Nico
-        # ! The overall amount of journals returned is greater (by several units) than the one expected.
-        
+    def getDiamondJournalsInAreasAndCategoriesWithQuartile(self, areas_ids: set[str], category_ids: set[str], quartiles: set[str]) -> list[Journal]:
         diamond_journals = []
-
-        all_journals = self.getAllJournals()
 
         target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids] 
         target_categories = self.getAllCategories() if not category_ids else [self.getEntityById(category) for category in category_ids]
         
-        if not quartiles: # has it been handled this case previously by Nico? 
+        if not quartiles: 
             target_quartiles = None
         elif not quartiles.issubset({"Q1", "Q2", "Q3", "Q4"}): 
             target_quartiles = None
@@ -1114,15 +1105,29 @@ class FullQueryEngine(BasicQueryEngine):
         target_areas = list(filter(None, target_areas)) 
         target_categories = list(filter(None, target_categories))
 
-        for journal in filter(lambda journal: not journal.hasAPC(), all_journals): # matching categories + quartiles AND area(s)
-            if any(area in target_areas for area in journal.getAreas()):
-                for category in filter(lambda category: category in target_categories, journal.getCategories()):
-                    if target_quartiles is None or category.getQuartile() in target_quartiles:
-                        diamond_journals.append(journal)
-                        break 
+        for journal in filter(lambda j: not j.hasAPC(), self.getAllJournals()): 
+            valid_categories_and_quartiles = False
+            valid_areas = False
 
-        return set(diamond_journals) # per sicurezza 
-    
+            if target_areas is not None:
+                for journal_area in journal.getAreas():
+                    if journal_area in target_areas:
+                        valid_areas = True
+                        break
+
+            for category in journal.getCategories():
+                category_match = target_categories is None or category in target_categories
+                quartile_match = not target_quartiles or category.getQuartile() in target_quartiles
+
+                if category_match and quartile_match: # one category with the RELATED quartile
+                    valid_categories_and_quartiles = True
+                    break
+            
+            if valid_categories_and_quartiles and valid_areas and journal not in diamond_journals: 
+                diamond_journals.append(journal)
+
+        return diamond_journals # per sicurezza
+        
 
 # ! for testing purposes 
 def getEntitiesFromList(
