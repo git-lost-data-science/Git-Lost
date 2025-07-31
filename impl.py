@@ -1,4 +1,3 @@
-# java -server -Xmx1g -jar blazegraph.jarjava -server -Xmx1g -jar blazegraph.jar
 import json
 import os
 import re
@@ -120,6 +119,8 @@ class Journal(IdentifiableEntity):
 
     def getLicense(self):
         return self.license
+    
+    getLicence = getLicense
 
     def hasAPC(self):
         return self.apc
@@ -830,27 +831,9 @@ class BasicQueryEngine:
 
             return None
 
+
     def getAllJournals(self) -> list[Journal]: # * Ila
         # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
-        all_journals = []
-
-        for journalQueryHandler in self.journalQuery:
-            journals_df = journalQueryHandler.getAllJournals()
-            if journals_df.empty: # it the columns is empty, ignore it, go on 
-                continue
-
-            for journal_ids in journals_df["journal-ids"]: # the journal-ids is a str for sure
-                journal = self.getEntityById(journal_ids)
-                if journal not in all_journals:
-                    all_journals.append(journal)
-        return all_journals
-    
-    """def getAllJournals(self) -> list[Journal]: # * Ila
-        # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
-        limit = 1000 
-        return self._getLimitedJournals(limit)  # limiting the number of the journals for testing purposes 
-
-    def _getLimitedJournals(self, limit: int | None = None) -> list[Journal]: 
         all_journals = []
 
         for journalQueryHandler in self.journalQuery:
@@ -862,11 +845,7 @@ class BasicQueryEngine:
                 journal = self.getEntityById(journal_ids)
                 if journal not in all_journals:
                     all_journals.append(journal)
-
-                if limit is not None and len(all_journals) >= limit: # if the limit has been reached or ignored, return the list made
-                    return all_journals
-
-        return all_journals"""
+        return all_journals
 
     def getJournalsWithTitle(self, partialTitle: str) -> list[Journal]: # * Martina
         journals_with_title = []
@@ -882,6 +861,22 @@ class BasicQueryEngine:
                     journals_with_title.append(journal)
 
         return journals_with_title
+
+    def getAllJournals(self) -> list[Journal]: # * Ila
+        # it returns a data frame containing all the journals that have, as a publisher, any that matches (even partially) with the input string.
+        all_journals = []
+
+        for journalQueryHandler in self.journalQuery:
+            journals_df = journalQueryHandler.getAllJournals()
+            if journals_df.empty: # it the columns is empty, ignore it, go on 
+                continue
+
+            for journal_ids in journals_df["journal-ids"]: # the journal-ids is a str for sure
+                journal = self.getEntityById(journal_ids)
+                if journal not in all_journals:
+                    all_journals.append(journal)
+        return all_journals
+    
         
     def getJournalsPublishedBy(self, partialName: str) -> list[Journal]: # * Nico
         journals_published_by = []
@@ -1054,17 +1049,18 @@ class FullQueryEngine(BasicQueryEngine):
             if journal_categories is None:
                 continue
 
-            valid_journal = False 
             for journal_category in journal_categories:
                 journal_category_quartile = journal_category.getQuartile()
-                matching_categories = journal_category in target_categories
-                matching_quartiles = not target_quartiles or journal_category_quartile in target_quartiles
-                if matching_categories and matching_quartiles:
-                    valid_journal = True 
+                category_is_match = journal_category in target_categories
+                quartiles_match = (
+                    target_quartiles is None 
+                    or journal_category_quartile is None 
+                    or journal_category_quartile in target_quartiles
+                )
+                
+                if category_is_match and quartiles_match and journal not in journals_in_categories:
+                    journals_in_categories.append(journal)
                     break
-
-            if valid_journal and journal not in journals_in_categories: 
-                journals_in_categories.append(journal)
 
         return journals_in_categories
     
@@ -1074,10 +1070,8 @@ class FullQueryEngine(BasicQueryEngine):
         
         target_areas = self.getAllAreas() if not areas_ids else [self.getEntityById(area) for area in areas_ids]
         target_areas = list(filter(None, target_areas))
-        
-        journals_with_license = self.getJournalsWithLicense(licenses)
 
-        for journal in journals_with_license:
+        for journal in self.getJournalsWithLicense(licenses):
             journal_areas = journal.getAreas() 
             if journal_areas is None:
                 continue
@@ -1115,11 +1109,16 @@ class FullQueryEngine(BasicQueryEngine):
                         valid_areas = True
                         break
 
-            for category in journal.getCategories():
-                category_match = target_categories is None or category in target_categories
-                quartile_match = not target_quartiles or category.getQuartile() in target_quartiles
-
-                if category_match and quartile_match: # one category with the RELATED quartile
+            for journal_category in journal.getCategories():
+                journal_category_quartile = journal_category.getQuartile()
+                category_is_match = journal_category in target_categories
+                quartiles_match = (
+                    target_quartiles is None 
+                    or journal_category_quartile is None 
+                    or journal_category_quartile in target_quartiles
+                )
+                
+                if category_is_match and quartiles_match:
                     valid_categories_and_quartiles = True
                     break
             
